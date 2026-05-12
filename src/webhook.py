@@ -189,6 +189,22 @@ def health():
     return {"status": "ok", "bot": "Instagram SDR Bot — Eduardo Prado (@pradoclima)"}
 
 
+@app.get("/debug/claude")
+def debug_claude():
+    """Testa conexão com Claude API e retorna erro detalhado se falhar."""
+    if not agent:
+        return {"status": "error", "detail": "ANTHROPIC_API_KEY não configurada — agent é None"}
+    try:
+        result = agent.client.messages.create(
+            model=agent.model,
+            max_tokens=10,
+            messages=[{"role": "user", "content": "responda só: ok"}],
+        )
+        return {"status": "ok", "response": result.content[0].text.strip()}
+    except Exception as e:
+        return {"status": "error", "type": type(e).__name__, "detail": str(e)}
+
+
 @app.get("/stats")
 def stats():
     if not conv_manager:
