@@ -15,6 +15,7 @@ from .sales_agent import SalesAgent
 from .conversation_manager import ConversationManager
 from .reactivation import ReactivationService
 from .config import Config
+from .products import PRODUCTS
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,8 @@ async def startup():
             instagram_account_id=Config.INSTAGRAM_ACCOUNT_ID,
         )
         asyncio.create_task(_reactivation_loop())
-        logger.info("Scheduler de reativação iniciado.")
+        asyncio.create_task(_purchase_followup_loop())
+        logger.info("Schedulers de reativação e follow-up de compra iniciados.")
 
 
 async def _reactivation_loop():
@@ -58,6 +60,37 @@ async def _reactivation_loop():
                 logger.info(f"[REATIVAÇÃO AUTO] {result}")
             except Exception as e:
                 logger.error(f"[REATIVAÇÃO AUTO] Erro: {e}")
+
+
+async def _purchase_followup_loop():
+    """Roda a cada 2 horas e envia follow-up para quem recebeu link mas não comprou."""
+    while True:
+        await asyncio.sleep(7200)
+        if agent and conv_manager and reactivation_svc:
+            try:
+                pending = conv_manager.get_purchase_followup_pending(hours_min=2, hours_max=72)
+                for lead in pending:
+                    user_id = lead["user_id"]
+                    user_name = lead["user_name"]
+                    product_id = lead.get("product_recommended", "")
+                    attempt = lead.get("purchase_followup_count", 0) + 1
+                    hours_since = lead.get("hours_since_link", 24)
+                    product = PRODUCTS.get(product_id, {})
+                    message = agent.generate_purchase_followup(
+                        user_name=user_name,
+                        product_name=product.get("name", "o produto"),
+                        product_link=product.get("link", ""),
+                        hours_since_link=hours_since,
+                        attempt=attempt,
+                    )
+                    if reactivation_svc._send_manychat_dm(user_id, message):
+                        conv_manager.add_message(user_id, "assistant", message)
+                        conv_manager.mark_purchase_followup_sent(user_id)
+                        if attempt >= 3:
+                            conv_manager.mark_cold(user_id)
+                        logger.info(f"[FOLLOW-UP COMPRA AUTO] Tentativa {attempt} → {user_name}")
+            except Exception as e:
+                logger.error(f"[FOLLOW-UP COMPRA AUTO] Erro: {e}")
 
 
 # ─── Schema ─────────────────────────────────────────────────────────────────
@@ -187,6 +220,115 @@ def reactivation_pending(hours: int = 24):
 @app.get("/health")
 def health():
     return {"status": "ok", "bot": "Instagram SDR Bot — Eduardo Prado (@pradoclima)"}
+
+
+# ─── Webhook Greenn — confirmação de compra ──────────────────────────────────
+
+class GreennPurchasePayload(BaseModel):
+    email: Optional[str] = ""
+    subscriber_id: Optional[str] = ""
+    product_id: Optional[str] = ""
+    transaction_id: Optional[str] = ""
+    status: Optional[str] = "approved"
+
+
+@app.post("/purchase/confirmed")
+async def greenn_purchase_webhook(payload: GreennPurchasePayload):
+    """
+    Greenn chama este endpoint quando uma compra é confirmada.
+    Configure em: Greenn → Produto → Webhooks → URL de notificação
+    """
+    if payload.status not in ("approved", "paid", "complete", "completed"):
+        return {"message": "status ignorado", "status": payload.status}
+
+    subscriber_id = payload.subscriber_id or ""
+    email = payload.email or ""
+
+    # Tenta encontrar o subscriber pelo ID direto ou pelo email
+    found_id = None
+    if subscriber_id and subscriber_id in conv_manager.conversations:
+        found_id = subscriber_id
+    elif email:
+        found_id = conv_manager.find_by_email(email)
+
+    if found_id:
+        conv_manager.mark_purchased(found_id, product_id=payload.product_id, buyer_email=email)
+        logger.info(f"[COMPRA] Venda confirmada para subscriber {found_id} (email: {email}, produto: {payload.product_id})")
+        return {"message": "compra registrada", "subscriber_id": found_id}
+
+    logger.warning(f"[COMPRA] Não encontrou subscriber para email={email} id={subscriber_id}")
+    return {"message": "subscriber não encontrado — compra não vinculada", "email": email}
+
+
+# ─── Follow-up de não-compradores ────────────────────────────────────────────
+
+@app.post("/followup/non-buyers/run")
+def run_non_buyer_followup():
+    """
+    Envia follow-up para quem recebeu o link mas não comprou.
+    Rode manualmente ou configure um cron no Railway.
+    """
+    if not reactivation_svc or not agent:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    pending = conv_manager.get_purchase_followup_pending(hours_min=2, hours_max=72)
+    results = {"total": len(pending), "sent": 0, "failed": 0}
+
+    for lead in pending:
+        user_id = lead["user_id"]
+        user_name = lead["user_name"]
+        product_id = lead.get("product_recommended", "")
+        attempt = lead.get("purchase_followup_count", 0) + 1
+        hours_since = lead.get("hours_since_link", 24)
+
+        product = PRODUCTS.get(product_id, {})
+        product_name = product.get("name", "o produto")
+        product_link = product.get("link", "")
+
+        try:
+            message = agent.generate_purchase_followup(
+                user_name=user_name,
+                product_name=product_name,
+                product_link=product_link,
+                hours_since_link=hours_since,
+                attempt=attempt,
+            )
+            success = reactivation_svc._send_manychat_dm(user_id, message)
+            if success:
+                conv_manager.add_message(user_id, "assistant", message)
+                conv_manager.mark_purchase_followup_sent(user_id)
+                if attempt >= 3:
+                    conv_manager.mark_cold(user_id)
+                results["sent"] += 1
+                logger.info(f"[FOLLOW-UP COMPRA] Tentativa {attempt} → {user_name} ({hours_since}h desde o link)")
+            else:
+                results["failed"] += 1
+        except Exception as e:
+            logger.error(f"[FOLLOW-UP COMPRA] Erro para {user_name}: {e}")
+            results["failed"] += 1
+
+    return results
+
+
+@app.get("/followup/non-buyers/pending")
+def non_buyer_followup_pending():
+    """Lista quem está pendente de follow-up de compra."""
+    if not conv_manager:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    pending = conv_manager.get_purchase_followup_pending(hours_min=2, hours_max=72)
+    return {
+        "total": len(pending),
+        "leads": [
+            {
+                "user_id": l["user_id"],
+                "user_name": l["user_name"],
+                "product": l.get("product_recommended"),
+                "hours_since_link": l.get("hours_since_link"),
+                "followup_count": l.get("purchase_followup_count", 0),
+            }
+            for l in pending
+        ],
+    }
 
 
 @app.get("/debug/claude")

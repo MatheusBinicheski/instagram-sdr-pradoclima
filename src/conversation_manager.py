@@ -83,7 +83,73 @@ class ConversationManager:
     def mark_link_sent(self, user_id: str, product_id: str):
         if user_id in self.conversations:
             self.conversations[user_id]["link_sent"] = True
+            self.conversations[user_id]["link_sent_at"] = datetime.now().isoformat()
             self.conversations[user_id]["product_recommended"] = product_id
+            self.conversations[user_id]["purchase_followup_count"] = 0
+            self.conversations[user_id]["last_purchase_followup_at"] = None
+            self._save()
+
+    def mark_purchased(self, user_id: str, product_id: str = "", buyer_email: str = ""):
+        if user_id in self.conversations:
+            self.conversations[user_id]["status"] = "vendido"
+            self.conversations[user_id]["stage"] = "fechado"
+            self.conversations[user_id]["sold_at"] = datetime.now().isoformat()
+            if product_id:
+                self.conversations[user_id]["product_purchased"] = product_id
+            if buyer_email:
+                self.conversations[user_id]["buyer_email"] = buyer_email
+            self._save()
+
+    def find_by_email(self, email: str) -> Optional[str]:
+        """Retorna subscriber_id pelo email do comprador (para webhook da Greenn)."""
+        email = email.lower().strip()
+        for uid, conv in self.conversations.items():
+            if conv.get("prospect_email", "").lower() == email:
+                return uid
+            if conv.get("buyer_email", "").lower() == email:
+                return uid
+        return None
+
+    def get_purchase_followup_pending(self, hours_min: int = 2, hours_max: int = 72) -> list[dict]:
+        """Leads que receberam o link mas não compraram ainda e precisam de follow-up."""
+        result = []
+        now = datetime.now()
+        cooldown = now - timedelta(hours=6)
+
+        for conv in self.conversations.values():
+            if conv.get("status") in ("vendido", "frio"):
+                continue
+            if not conv.get("link_sent"):
+                continue
+
+            link_sent_at = conv.get("link_sent_at")
+            if not link_sent_at:
+                continue
+
+            link_dt = datetime.fromisoformat(link_sent_at)
+            hours_since = (now - link_dt).total_seconds() / 3600
+
+            if hours_since < hours_min or hours_since > hours_max:
+                continue
+
+            followup_count = conv.get("purchase_followup_count", 0)
+            if followup_count >= 3:
+                continue
+
+            last_followup = conv.get("last_purchase_followup_at")
+            if last_followup and datetime.fromisoformat(last_followup) > cooldown:
+                continue
+
+            result.append({**conv, "hours_since_link": int(hours_since)})
+
+        return result
+
+    def mark_purchase_followup_sent(self, user_id: str):
+        if user_id in self.conversations:
+            self.conversations[user_id]["last_purchase_followup_at"] = datetime.now().isoformat()
+            self.conversations[user_id]["purchase_followup_count"] = (
+                self.conversations[user_id].get("purchase_followup_count", 0) + 1
+            )
             self._save()
 
     def get_cold_leads(self, hours: int = 24) -> list[dict]:

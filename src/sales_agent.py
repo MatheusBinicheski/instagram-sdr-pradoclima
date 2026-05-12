@@ -246,6 +246,50 @@ class SalesAgent:
         valid_stages = {"conexao", "qualificando", "apresentando", "objecao", "fechando", "frio"}
         return stage if stage in valid_stages else "qualificando"
 
+    def generate_purchase_followup(
+        self,
+        user_name: str,
+        product_name: str,
+        product_link: str,
+        hours_since_link: int,
+        attempt: int = 1,
+    ) -> str:
+        if attempt == 1:
+            tone = (
+                "Tom leve, sem pressão. Pergunta se chegou a ver o conteúdo do link. "
+                "Faz uma pergunta sobre o que tranca o negócio dele agora. "
+                "Não cita o preço. Máximo 2 frases."
+            )
+        elif attempt == 2:
+            tone = (
+                "Tom direto, de empresário que quer ver o outro crescer. "
+                "Reforça a dor principal do produto. Cita que a garantia é de 7 dias — risco zero. "
+                "Máximo 2 frases."
+            )
+        else:
+            tone = (
+                "Última tentativa. Tom de oportunidade real se fechando. "
+                "Pergunta direta: o que travou? Preço, tempo, dúvida? "
+                "Resolve a objeção em 1 frase. Máximo 2 frases."
+            )
+
+        prompt = (
+            f"Prospect: {user_name}\n"
+            f"Produto enviado: {product_name}\n"
+            f"Link: {product_link}\n"
+            f"Horas desde que recebeu o link: {hours_since_link}h\n"
+            f"Tentativa de follow-up número: {attempt}\n\n"
+            f"{tone}\n\n"
+            "Escreva o follow-up no tom do Eduardo Prado. Não seja chato. Seja genuíno."
+        )
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=100,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+
     def should_send_proactive_dm(self, follower_bio: str, follower_name: str) -> tuple[bool, str]:
         """Decide se deve enviar DM proativa para um seguidor baseado no perfil."""
         prompt = (
