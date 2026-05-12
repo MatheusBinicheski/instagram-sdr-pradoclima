@@ -456,8 +456,8 @@ def remarketing_send(slug: str):
 REMARKETING_BLOCKLIST = {"paulo roberto", "lindival neto", "lilian queiroz"}
 
 
-@app.get("/remarketing/all/preview")
-def remarketing_all_preview():
+@app.get("/remarketing/broadcast/preview")
+def remarketing_broadcast_preview():
     """Lista todos que vão receber o remarketing geral (exceto bloqueados)."""
     leads = [
         c for c in conv_manager.conversations.values()
@@ -472,8 +472,8 @@ def remarketing_all_preview():
     }
 
 
-@app.post("/remarketing/all/send")
-def remarketing_all_send():
+@app.post("/remarketing/broadcast/send")
+def remarketing_broadcast_send():
     """Envia remarketing do Mapa para Convencer para todos os contatos, exceto os 3 bloqueados."""
     if not agent or not reactivation_svc:
         raise HTTPException(status_code=503, detail="Bot não inicializado.")
