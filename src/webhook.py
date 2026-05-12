@@ -397,34 +397,42 @@ PRODUCT_SLUG = {
 }
 
 
+def _get_remarketing_leads(slug: str) -> tuple[dict, list]:
+    """Retorna (product, leads) para o slug. 'broadcast' = todos os contatos exceto bloqueados."""
+    if slug == "broadcast":
+        product = PRODUCTS["o_mapa_convencer"]
+        leads = [
+            c for c in conv_manager.conversations.values()
+            if c.get("status") != "vendido"
+            and c.get("user_name", "").lower().strip() not in REMARKETING_BLOCKLIST
+        ]
+    elif slug in PRODUCT_SLUG:
+        product = PRODUCTS[PRODUCT_SLUG[slug]]
+        leads = conv_manager.get_non_buyers_by_keyword(slug)
+    else:
+        raise HTTPException(status_code=404, detail=f"Use: mcc20, arte20 ou broadcast")
+    return product, leads
+
+
 @app.get("/remarketing/{slug}/preview")
 def remarketing_preview(slug: str):
-    """Lista quem vai receber o remarketing antes de disparar."""
-    slug = slug.lower()
-    if slug not in PRODUCT_SLUG:
-        raise HTTPException(status_code=404, detail=f"Produto '{slug}' não encontrado. Use: mcc20 ou arte20")
-    product_id = PRODUCT_SLUG[slug]
-    leads = conv_manager.get_non_buyers_by_keyword(slug)
+    """Lista quem vai receber o remarketing. slug: mcc20 | arte20 | broadcast"""
+    product, leads = _get_remarketing_leads(slug.lower())
     return {
-        "produto": PRODUCTS[product_id]["name"],
+        "produto": product["name"],
         "total": len(leads),
-        "leads": [{"user_id": l["user_id"], "user_name": l["user_name"], "status": l.get("status")} for l in leads],
+        "bloqueados": list(REMARKETING_BLOCKLIST) if slug == "broadcast" else [],
+        "leads": [{"user_id": l["user_id"], "user_name": l["user_name"]} for l in leads],
     }
 
 
 @app.post("/remarketing/{slug}/send")
 def remarketing_send(slug: str):
-    """Dispara remarketing para todos que digitaram a keyword e não compraram."""
+    """Dispara remarketing. slug: mcc20 | arte20 | broadcast"""
     if not agent or not reactivation_svc:
         raise HTTPException(status_code=503, detail="Bot não inicializado.")
 
-    slug = slug.lower()
-    if slug not in PRODUCT_SLUG:
-        raise HTTPException(status_code=404, detail=f"Produto '{slug}' não encontrado. Use: mcc20 ou arte20")
-
-    product_id = PRODUCT_SLUG[slug]
-    product = PRODUCTS[product_id]
-    leads = conv_manager.get_non_buyers_by_keyword(slug)
+    product, leads = _get_remarketing_leads(slug.lower())
     results = {"produto": product["name"], "total": len(leads), "sent": 0, "failed": 0}
 
     for lead in leads:
@@ -441,11 +449,11 @@ def remarketing_send(slug: str):
             if reactivation_svc._send_manychat_dm(user_id, message):
                 conv_manager.add_message(user_id, "assistant", message)
                 results["sent"] += 1
-                logger.info(f"[REMARKETING] {slug.upper()} → {user_name} ({user_id})")
+                logger.info(f"[REMARKETING {slug.upper()}] → {user_name} ({user_id})")
             else:
                 results["failed"] += 1
         except Exception as e:
-            logger.error(f"[REMARKETING] Erro para {user_name}: {e}")
+            logger.error(f"[REMARKETING {slug.upper()}] Erro para {user_name}: {e}")
             results["failed"] += 1
 
     return results
