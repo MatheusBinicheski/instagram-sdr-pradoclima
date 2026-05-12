@@ -416,36 +416,69 @@ def _get_remarketing_leads(slug: str) -> tuple[dict, list]:
 
 @app.get("/remarketing/{slug}/preview")
 def remarketing_preview(slug: str):
-    """Lista quem vai receber o remarketing. slug: mcc20 | arte20 | broadcast"""
-    product, leads = _get_remarketing_leads(slug.lower())
+    """Lista quem vai receber. slug: mcc20 | arte20 | broadcast | manychat"""
+    slug = slug.lower()
+
+    if slug == "manychat":
+        if not reactivation_svc:
+            raise HTTPException(status_code=503, detail="Bot não inicializado.")
+        all_subs = reactivation_svc.get_all_subscribers()
+        filtered = _filter_blocklist(all_subs)
+        return {
+            "total_manychat": len(all_subs),
+            "total_para_envio": len(filtered),
+            "bloqueados": list(REMARKETING_BLOCKLIST),
+            "leads": [{"id": s.get("id"), "nome": f"{s.get('first_name','')} {s.get('last_name','')}".strip()} for s in filtered],
+        }
+
+    product, leads = _get_remarketing_leads(slug)
     return {
         "produto": product["name"],
         "total": len(leads),
-        "bloqueados": list(REMARKETING_BLOCKLIST) if slug == "broadcast" else [],
+        "bloqueados": list(REMARKETING_BLOCKLIST) if slug in ("broadcast", "manychat") else [],
         "leads": [{"user_id": l["user_id"], "user_name": l["user_name"]} for l in leads],
     }
 
 
 @app.post("/remarketing/{slug}/send")
 def remarketing_send(slug: str):
-    """Dispara remarketing. slug: mcc20 | arte20 | broadcast"""
+    """Dispara remarketing. slug: mcc20 | arte20 | broadcast | manychat"""
     if not agent or not reactivation_svc:
         raise HTTPException(status_code=503, detail="Bot não inicializado.")
 
-    product, leads = _get_remarketing_leads(slug.lower())
+    slug = slug.lower()
+    product = PRODUCTS["o_mapa_convencer"]
+
+    if slug == "manychat":
+        all_subs = reactivation_svc.get_all_subscribers()
+        filtered = _filter_blocklist(all_subs)
+        results = {"total_manychat": len(all_subs), "sent": 0, "failed": 0, "bloqueados": len(all_subs) - len(filtered)}
+
+        for s in filtered:
+            user_id = str(s.get("id", ""))
+            user_name = s.get("first_name", "amigo").strip() or "amigo"
+            tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
+            try:
+                message = agent.generate_remarketing_message(user_name=user_name, product_name=product["name"], product_link=tracked_link)
+                if reactivation_svc._send_manychat_dm(user_id, message):
+                    results["sent"] += 1
+                    logger.info(f"[REMARKETING MANYCHAT] → {user_name} ({user_id})")
+                else:
+                    results["failed"] += 1
+            except Exception as e:
+                logger.error(f"[REMARKETING MANYCHAT] Erro para {user_name}: {e}")
+                results["failed"] += 1
+        return results
+
+    product, leads = _get_remarketing_leads(slug)
     results = {"produto": product["name"], "total": len(leads), "sent": 0, "failed": 0}
 
     for lead in leads:
         user_id = lead["user_id"]
         user_name = lead["user_name"]
         tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
-
         try:
-            message = agent.generate_remarketing_message(
-                user_name=user_name,
-                product_name=product["name"],
-                product_link=tracked_link,
-            )
+            message = agent.generate_remarketing_message(user_name=user_name, product_name=product["name"], product_link=tracked_link)
             if reactivation_svc._send_manychat_dm(user_id, message):
                 conv_manager.add_message(user_id, "assistant", message)
                 results["sent"] += 1
@@ -462,6 +495,18 @@ def remarketing_send(slug: str):
 # ─── Remarketing geral (todos os contatos menos excluídos) ───────────────────
 
 REMARKETING_BLOCKLIST = {"paulo roberto", "lindival neto", "lilian queiroz"}
+
+
+def _filter_blocklist(subscribers: list) -> list:
+    result = []
+    for s in subscribers:
+        full = f"{s.get('first_name','').strip()} {s.get('last_name','').strip()}".strip().lower()
+        first = s.get("first_name", "").strip().lower()
+        if full in REMARKETING_BLOCKLIST or first in REMARKETING_BLOCKLIST:
+            logger.info(f"[BLOCKLIST] Ignorando: {full}")
+            continue
+        result.append(s)
+    return result
 
 
 @app.get("/remarketing/broadcast/preview")
@@ -513,77 +558,6 @@ def remarketing_broadcast_send():
                 results["failed"] += 1
         except Exception as e:
             logger.error(f"[REMARKETING GERAL] Erro para {user_name}: {e}")
-            results["failed"] += 1
-
-    return results
-
-
-# ─── Remarketing via ManyChat API (todos os subscribers) ─────────────────────
-
-@app.get("/remarketing/manychat/preview")
-def remarketing_manychat_preview():
-    """Busca todos os subscribers do ManyChat e mostra quem vai receber (exceto bloqueados)."""
-    if not reactivation_svc:
-        raise HTTPException(status_code=503, detail="Bot não inicializado.")
-
-    all_subs = reactivation_svc.get_all_subscribers()
-    filtered = [
-        s for s in all_subs
-        if s.get("first_name", "").lower().strip() + " " + s.get("last_name", "").lower().strip()
-        not in REMARKETING_BLOCKLIST
-        and s.get("first_name", "").lower().strip() not in REMARKETING_BLOCKLIST
-    ]
-    return {
-        "total_manychat": len(all_subs),
-        "total_para_envio": len(filtered),
-        "bloqueados": list(REMARKETING_BLOCKLIST),
-        "leads": [
-            {
-                "id": s.get("id"),
-                "nome": f"{s.get('first_name', '')} {s.get('last_name', '')}".strip(),
-            }
-            for s in filtered
-        ],
-    }
-
-
-@app.post("/remarketing/manychat/send")
-def remarketing_manychat_send():
-    """Dispara remarketing do Mapa para Convencer para todos os subscribers do ManyChat."""
-    if not agent or not reactivation_svc:
-        raise HTTPException(status_code=503, detail="Bot não inicializado.")
-
-    all_subs = reactivation_svc.get_all_subscribers()
-    product = PRODUCTS["o_mapa_convencer"]
-    results = {"total_manychat": len(all_subs), "sent": 0, "failed": 0, "bloqueados": 0}
-
-    for s in all_subs:
-        first = s.get("first_name", "").strip()
-        last = s.get("last_name", "").strip()
-        full_name = f"{first} {last}".strip().lower()
-        user_name = first or "amigo"
-        user_id = str(s.get("id", ""))
-
-        if full_name in REMARKETING_BLOCKLIST or first.lower() in REMARKETING_BLOCKLIST:
-            results["bloqueados"] += 1
-            logger.info(f"[REMARKETING MANYCHAT] Bloqueado: {full_name}")
-            continue
-
-        tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
-
-        try:
-            message = agent.generate_remarketing_message(
-                user_name=user_name,
-                product_name=product["name"],
-                product_link=tracked_link,
-            )
-            if reactivation_svc._send_manychat_dm(user_id, message):
-                results["sent"] += 1
-                logger.info(f"[REMARKETING MANYCHAT] → {user_name} ({user_id})")
-            else:
-                results["failed"] += 1
-        except Exception as e:
-            logger.error(f"[REMARKETING MANYCHAT] Erro para {user_name}: {e}")
             results["failed"] += 1
 
     return results
