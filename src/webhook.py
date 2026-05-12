@@ -95,12 +95,19 @@ async def _purchase_followup_loop():
 
 # ─── Schema ─────────────────────────────────────────────────────────────────
 
+TAG_TO_PRODUCT = {
+    "open_checkout_mcc20": "o_mapa_convencer",
+    "open_checkout_arte20": "a_arte_de_precificar",
+}
+
+
 class ManyChatPayload(BaseModel):
     subscriber_id: str
     first_name: Optional[str] = ""
     last_message: Optional[str] = ""
     attachment_type: Optional[str] = ""
     attachment_url: Optional[str] = ""
+    tag: Optional[str] = ""  # tag enviada pelo ManyChat: open_checkout_mcc20 | open_checkout_arte20
 
 
 # ─── DMs ────────────────────────────────────────────────────────────────────
@@ -126,13 +133,31 @@ async def manychat_webhook(payload: ManyChatPayload):
 
     logger.info(f"[DM] {user_name} ({user_id}) [{attachment_type or 'text'}]: '{(message or attachment_url)[:80]}'")
 
+    tag = _clean(payload.tag or "").lower()
+    product_from_tag = TAG_TO_PRODUCT.get(tag)
+
     try:
         conv_manager.get_or_create(user_id, user_name)
         history = conv_manager.get_history(user_id)
         conv_manager.add_message(user_id, "user", history_message)
 
+        # Se veio tag de produto, marca direto no histórico da conversa
+        if product_from_tag:
+            conv_manager.mark_link_sent(user_id, product_from_tag)
+            logger.info(f"[TAG] {user_name} → tag='{tag}' produto='{product_from_tag}'")
+
         current_stage = agent.classify_message_stage(history_message, history)
         conv_manager.update_stage(user_id, current_stage)
+
+        # Injeta contexto do produto identificado pela tag
+        extra_context = ""
+        if product_from_tag:
+            p = PRODUCTS[product_from_tag]
+            extra_context = (
+                f"IMPORTANTE: Este lead abriu o checkout do produto '{p['name']}'. "
+                f"Ele demonstrou interesse real. Foco total neste produto. "
+                f"Se ainda não comprou, apresente os benefícios e mande o link: {p['link']}"
+            )
 
         response_text = agent.generate_dm_response(
             user_name=user_name,
@@ -141,6 +166,7 @@ async def manychat_webhook(payload: ManyChatPayload):
             stage=current_stage,
             attachment_type=attachment_type,
             attachment_url=attachment_url,
+            extra_context=extra_context,
         )
 
         conv_manager.add_message(user_id, "assistant", response_text)
