@@ -248,6 +248,24 @@ class ConversationManager:
         last_dt = datetime.fromisoformat(last)
         return datetime.now() - last_dt > timedelta(minutes=cooldown_minutes)
 
+    def mark_keyword_triggered(self, user_id: str, keyword: str, product_id: str):
+        """Registra que o lead digitou uma keyword de produto."""
+        if user_id in self.conversations:
+            keywords = self.conversations[user_id].get("keywords_triggered", [])
+            if keyword not in keywords:
+                keywords.append(keyword)
+            self.conversations[user_id]["keywords_triggered"] = keywords
+            self.conversations[user_id]["product_recommended"] = product_id
+            self._save()
+
+    def get_non_buyers_by_keyword(self, keyword: str) -> list[dict]:
+        """Retorna todos que digitaram a keyword e não compraram."""
+        return [
+            conv for conv in self.conversations.values()
+            if keyword in conv.get("keywords_triggered", [])
+            and conv.get("status") not in ("vendido",)
+        ]
+
     def get_non_buyers_by_product(self, product_id: str) -> list[dict]:
         """Retorna todos que receberam o link de um produto mas não compraram."""
         return [

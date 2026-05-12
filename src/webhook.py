@@ -157,6 +157,10 @@ async def manychat_webhook(payload: ManyChatPayload):
         history = conv_manager.get_history(user_id)
         conv_manager.add_message(user_id, "user", history_message)
 
+        if product_from_keyword:
+            keyword_label = "mcc20" if product_from_keyword == "o_mapa_convencer" else "arte20"
+            conv_manager.mark_keyword_triggered(user_id, keyword_label, product_from_keyword)
+
         if triggered_product:
             conv_manager.mark_link_sent(user_id, triggered_product)
             logger.info(f"[PRODUTO] {user_name} → produto='{triggered_product}' (keyword={bool(product_from_keyword)}, tag={bool(product_from_tag)})")
@@ -396,10 +400,11 @@ PRODUCT_SLUG = {
 @app.get("/remarketing/{slug}/preview")
 def remarketing_preview(slug: str):
     """Lista quem vai receber o remarketing antes de disparar."""
-    product_id = PRODUCT_SLUG.get(slug.lower())
-    if not product_id:
+    slug = slug.lower()
+    if slug not in PRODUCT_SLUG:
         raise HTTPException(status_code=404, detail=f"Produto '{slug}' não encontrado. Use: mcc20 ou arte20")
-    leads = conv_manager.get_non_buyers_by_product(product_id)
+    product_id = PRODUCT_SLUG[slug]
+    leads = conv_manager.get_non_buyers_by_keyword(slug)
     return {
         "produto": PRODUCTS[product_id]["name"],
         "total": len(leads),
@@ -409,23 +414,22 @@ def remarketing_preview(slug: str):
 
 @app.post("/remarketing/{slug}/send")
 def remarketing_send(slug: str):
-    """Dispara remarketing para todos que receberam o link mas não compraram."""
+    """Dispara remarketing para todos que digitaram a keyword e não compraram."""
     if not agent or not reactivation_svc:
         raise HTTPException(status_code=503, detail="Bot não inicializado.")
 
-    product_id = PRODUCT_SLUG.get(slug.lower())
-    if not product_id:
+    slug = slug.lower()
+    if slug not in PRODUCT_SLUG:
         raise HTTPException(status_code=404, detail=f"Produto '{slug}' não encontrado. Use: mcc20 ou arte20")
 
+    product_id = PRODUCT_SLUG[slug]
     product = PRODUCTS[product_id]
-    leads = conv_manager.get_non_buyers_by_product(product_id)
-    results = {"produto": product["name"], "total": len(leads), "sent": 0, "failed": 0, "skipped": 0}
+    leads = conv_manager.get_non_buyers_by_keyword(slug)
+    results = {"produto": product["name"], "total": len(leads), "sent": 0, "failed": 0}
 
     for lead in leads:
         user_id = lead["user_id"]
         user_name = lead["user_name"]
-
-        # Injeta o ref no link para rastreamento
         tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
 
         try:
