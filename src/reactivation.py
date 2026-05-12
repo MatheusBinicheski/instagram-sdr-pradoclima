@@ -44,6 +44,40 @@ class ReactivationService:
         self.instagram_token = instagram_token
         self.instagram_account_id = instagram_account_id
 
+    def get_all_subscribers(self) -> list[dict]:
+        """Busca todos os subscribers ativos no ManyChat via API (paginado)."""
+        if not self.manychat_key:
+            logger.warning("MANYCHAT_API_KEY não configurada.")
+            return []
+
+        headers = {"Authorization": f"Bearer {self.manychat_key}"}
+        subscribers = []
+        page = 1
+
+        with httpx.Client(timeout=30) as client:
+            while True:
+                try:
+                    resp = client.get(
+                        f"{MANYCHAT_API}/fb/subscriber/getAll",
+                        headers=headers,
+                        params={"status": "active", "page": page, "count": 100},
+                    )
+                    data = resp.json()
+                    batch = data.get("data", [])
+                    if not batch:
+                        break
+                    subscribers.extend(batch)
+                    logger.info(f"[MANYCHAT] Página {page}: {len(batch)} subscribers")
+                    if len(batch) < 100:
+                        break
+                    page += 1
+                except Exception as e:
+                    logger.error(f"[MANYCHAT] Erro ao buscar subscribers página {page}: {e}")
+                    break
+
+        logger.info(f"[MANYCHAT] Total de subscribers carregados: {len(subscribers)}")
+        return subscribers
+
     def _send_manychat_dm(self, subscriber_id: str, text: str) -> bool:
         if not self.manychat_key:
             logger.warning("MANYCHAT_API_KEY não configurada. DM não enviada.")

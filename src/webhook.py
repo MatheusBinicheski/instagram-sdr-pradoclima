@@ -518,6 +518,77 @@ def remarketing_broadcast_send():
     return results
 
 
+# ─── Remarketing via ManyChat API (todos os subscribers) ─────────────────────
+
+@app.get("/remarketing/manychat/preview")
+def remarketing_manychat_preview():
+    """Busca todos os subscribers do ManyChat e mostra quem vai receber (exceto bloqueados)."""
+    if not reactivation_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    all_subs = reactivation_svc.get_all_subscribers()
+    filtered = [
+        s for s in all_subs
+        if s.get("first_name", "").lower().strip() + " " + s.get("last_name", "").lower().strip()
+        not in REMARKETING_BLOCKLIST
+        and s.get("first_name", "").lower().strip() not in REMARKETING_BLOCKLIST
+    ]
+    return {
+        "total_manychat": len(all_subs),
+        "total_para_envio": len(filtered),
+        "bloqueados": list(REMARKETING_BLOCKLIST),
+        "leads": [
+            {
+                "id": s.get("id"),
+                "nome": f"{s.get('first_name', '')} {s.get('last_name', '')}".strip(),
+            }
+            for s in filtered
+        ],
+    }
+
+
+@app.post("/remarketing/manychat/send")
+def remarketing_manychat_send():
+    """Dispara remarketing do Mapa para Convencer para todos os subscribers do ManyChat."""
+    if not agent or not reactivation_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    all_subs = reactivation_svc.get_all_subscribers()
+    product = PRODUCTS["o_mapa_convencer"]
+    results = {"total_manychat": len(all_subs), "sent": 0, "failed": 0, "bloqueados": 0}
+
+    for s in all_subs:
+        first = s.get("first_name", "").strip()
+        last = s.get("last_name", "").strip()
+        full_name = f"{first} {last}".strip().lower()
+        user_name = first or "amigo"
+        user_id = str(s.get("id", ""))
+
+        if full_name in REMARKETING_BLOCKLIST or first.lower() in REMARKETING_BLOCKLIST:
+            results["bloqueados"] += 1
+            logger.info(f"[REMARKETING MANYCHAT] Bloqueado: {full_name}")
+            continue
+
+        tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
+
+        try:
+            message = agent.generate_remarketing_message(
+                user_name=user_name,
+                product_name=product["name"],
+                product_link=tracked_link,
+            )
+            if reactivation_svc._send_manychat_dm(user_id, message):
+                results["sent"] += 1
+                logger.info(f"[REMARKETING MANYCHAT] → {user_name} ({user_id})")
+            else:
+                results["failed"] += 1
+        except Exception as e:
+            logger.error(f"[REMARKETING MANYCHAT] Erro para {user_name}: {e}")
+            results["failed"] += 1
+
+    return results
+
+
 @app.get("/debug/claude")
 def debug_claude():
     """Testa conexão com Claude API e retorna erro detalhado se falhar."""
