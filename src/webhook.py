@@ -86,34 +86,43 @@ async def manychat_webhook(payload: ManyChatPayload):
     attachment_type = _clean(payload.attachment_type or "").lower()
     attachment_url = _clean(payload.attachment_url or "")
 
-    history_message = message or f"[enviou {attachment_type}]" if attachment_type else "oi"
+    if attachment_type:
+        history_message = message or f"[enviou {attachment_type}]"
+    else:
+        history_message = message or "oi"
 
     logger.info(f"[DM] {user_name} ({user_id}) [{attachment_type or 'text'}]: '{(message or attachment_url)[:80]}'")
 
-    conv_manager.get_or_create(user_id, user_name)
-    history = conv_manager.get_history(user_id)
-    conv_manager.add_message(user_id, "user", history_message)
+    try:
+        conv_manager.get_or_create(user_id, user_name)
+        history = conv_manager.get_history(user_id)
+        conv_manager.add_message(user_id, "user", history_message)
 
-    current_stage = agent.classify_message_stage(history_message, history)
-    conv_manager.update_stage(user_id, current_stage)
+        current_stage = agent.classify_message_stage(history_message, history)
+        conv_manager.update_stage(user_id, current_stage)
 
-    response_text = agent.generate_dm_response(
-        user_name=user_name,
-        user_message=message or history_message,
-        conversation_history=history,
-        stage=current_stage,
-        attachment_type=attachment_type,
-        attachment_url=attachment_url,
-    )
+        response_text = agent.generate_dm_response(
+            user_name=user_name,
+            user_message=message or history_message,
+            conversation_history=history,
+            stage=current_stage,
+            attachment_type=attachment_type,
+            attachment_url=attachment_url,
+        )
 
-    conv_manager.add_message(user_id, "assistant", response_text)
+        conv_manager.add_message(user_id, "assistant", response_text)
 
-    link_sent = _detect_link_sent(response_text)
-    if link_sent:
-        conv_manager.mark_link_sent(user_id, link_sent)
+        link_sent = _detect_link_sent(response_text)
+        if link_sent:
+            conv_manager.mark_link_sent(user_id, link_sent)
 
-    logger.info(f"[DM] Resposta ({current_stage}): '{response_text[:80]}'")
-    return _build_response(response_text)
+        logger.info(f"[DM] Resposta ({current_stage}): '{response_text[:80]}'")
+        return _build_response(response_text)
+
+    except Exception as e:
+        logger.error(f"[DM] Erro ao processar mensagem de {user_name} ({user_id}): {e}", exc_info=True)
+        fallback = "Oi! Recebi sua mensagem. Me manda o que você precisa que eu te ajudo."
+        return _build_response(fallback)
 
 
 # ─── Comentários ────────────────────────────────────────────────────────────
@@ -202,7 +211,7 @@ def _build_response(text: str) -> JSONResponse:
     msgs = [{"type": "text", "text": p} for p in parts] or [{"type": "text", "text": safe}]
     return JSONResponse({
         "version": "v2",
-        "content": {"type": "instagram", "messages": msgs, "actions": [], "quick_replies": []},
+        "content": {"messages": msgs, "actions": [], "quick_replies": []},
     })
 
 
