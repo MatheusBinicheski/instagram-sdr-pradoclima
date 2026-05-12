@@ -100,6 +100,18 @@ TAG_TO_PRODUCT = {
     "open_checkout_arte20": "a_arte_de_precificar",
 }
 
+KEYWORD_TO_PRODUCT = [
+    (re.compile(r"\barte\s*20\b", re.IGNORECASE), "a_arte_de_precificar"),
+    (re.compile(r"\bmcc\s*20\b", re.IGNORECASE), "o_mapa_convencer"),
+]
+
+
+def _detect_keyword_product(text: str) -> Optional[str]:
+    for pattern, product_id in KEYWORD_TO_PRODUCT:
+        if pattern.search(text):
+            return product_id
+    return None
+
 
 class ManyChatPayload(BaseModel):
     subscriber_id: str
@@ -135,28 +147,31 @@ async def manychat_webhook(payload: ManyChatPayload):
 
     tag = _clean(payload.tag or "").lower()
     product_from_tag = TAG_TO_PRODUCT.get(tag)
+    product_from_keyword = _detect_keyword_product(message)
+
+    # Keyword na mensagem tem prioridade sobre a tag
+    triggered_product = product_from_keyword or product_from_tag
 
     try:
         conv_manager.get_or_create(user_id, user_name)
         history = conv_manager.get_history(user_id)
         conv_manager.add_message(user_id, "user", history_message)
 
-        # Se veio tag de produto, marca direto no histórico da conversa
-        if product_from_tag:
-            conv_manager.mark_link_sent(user_id, product_from_tag)
-            logger.info(f"[TAG] {user_name} → tag='{tag}' produto='{product_from_tag}'")
+        if triggered_product:
+            conv_manager.mark_link_sent(user_id, triggered_product)
+            logger.info(f"[PRODUTO] {user_name} → produto='{triggered_product}' (keyword={bool(product_from_keyword)}, tag={bool(product_from_tag)})")
 
         current_stage = agent.classify_message_stage(history_message, history)
         conv_manager.update_stage(user_id, current_stage)
 
-        # Injeta contexto do produto identificado pela tag
         extra_context = ""
-        if product_from_tag:
-            p = PRODUCTS[product_from_tag]
+        if triggered_product:
+            p = PRODUCTS[triggered_product]
             extra_context = (
-                f"IMPORTANTE: Este lead abriu o checkout do produto '{p['name']}'. "
-                f"Ele demonstrou interesse real. Foco total neste produto. "
-                f"Se ainda não comprou, apresente os benefícios e mande o link: {p['link']}"
+                f"AÇÃO OBRIGATÓRIA: O lead digitou uma palavra-chave de produto. "
+                f"Mande AGORA o link do '{p['name']}': {p['link']} "
+                f"Seja direto, mande o link já na primeira frase. "
+                f"Depois faça UMA pergunta para continuar a conversa."
             )
 
         response_text = agent.generate_dm_response(
