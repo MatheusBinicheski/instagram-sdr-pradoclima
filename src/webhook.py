@@ -563,6 +563,33 @@ def remarketing_broadcast_send():
     return results
 
 
+@app.get("/debug/manychat")
+def debug_manychat():
+    """Testa endpoints do ManyChat com a key real configurada no Railway."""
+    if not reactivation_svc or not Config.MANYCHAT_API_KEY:
+        return {"status": "error", "detail": "MANYCHAT_API_KEY não configurada"}
+    import httpx
+    headers = {"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}"}
+    results = {}
+    endpoints = [
+        ("GET", "fb/page/getInfo", {}),
+        ("GET", "fb/subscriber/getAll", {"count": 5}),
+        ("GET", "ig/subscriber/getAll", {"count": 5}),
+        ("POST", "fb/subscriber/findByName", {"name": "test"}),
+    ]
+    with httpx.Client(timeout=10) as client:
+        for method, path, params in endpoints:
+            try:
+                if method == "GET":
+                    r = client.get(f"https://api.manychat.com/{path}", headers=headers, params=params)
+                else:
+                    r = client.post(f"https://api.manychat.com/{path}", headers=headers, json=params)
+                results[path] = {"status": r.status_code, "body": r.text[:300]}
+            except Exception as e:
+                results[path] = {"error": str(e)}
+    return results
+
+
 @app.get("/debug/claude")
 def debug_claude():
     """Testa conexão com Claude API e retorna erro detalhado se falhar."""
