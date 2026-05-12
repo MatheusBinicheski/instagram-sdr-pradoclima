@@ -150,12 +150,12 @@ async def manychat_webhook(payload: ManyChatPayload):
             conv_manager.mark_link_sent(user_id, link_sent)
 
         logger.info(f"[DM] Resposta ({current_stage}): '{response_text[:80]}'")
-        return _build_response(response_text)
+        return _build_response(response_text, subscriber_id=user_id)
 
     except Exception as e:
         logger.error(f"[DM] Erro ao processar mensagem de {user_name} ({user_id}): {e}", exc_info=True)
         fallback = "Oi! Recebi sua mensagem. Me manda o que você precisa que eu te ajudo."
-        return _build_response(fallback)
+        return _build_response(fallback, subscriber_id=user_id)
 
 
 # ─── Comentários ────────────────────────────────────────────────────────────
@@ -225,11 +225,16 @@ def health():
 # ─── Webhook Greenn — confirmação de compra ──────────────────────────────────
 
 class GreennPurchasePayload(BaseModel):
+    # Campos padrão da Greenn
     email: Optional[str] = ""
-    subscriber_id: Optional[str] = ""
+    name: Optional[str] = ""
     product_id: Optional[str] = ""
     transaction_id: Optional[str] = ""
     status: Optional[str] = "approved"
+    # Campo injetado pelo link rastreado: ?ref=SUBSCRIBER_ID
+    ref: Optional[str] = ""
+    # Fallback: subscriber_id direto
+    subscriber_id: Optional[str] = ""
 
 
 @app.post("/purchase/confirmed")
@@ -237,27 +242,35 @@ async def greenn_purchase_webhook(payload: GreennPurchasePayload):
     """
     Greenn chama este endpoint quando uma compra é confirmada.
     Configure em: Greenn → Produto → Webhooks → URL de notificação
+
+    O subscriber_id chega via parâmetro ?ref= injetado no link pelo bot.
+    Fallback: busca por email caso ref não esteja presente.
     """
     if payload.status not in ("approved", "paid", "complete", "completed"):
         return {"message": "status ignorado", "status": payload.status}
 
-    subscriber_id = payload.subscriber_id or ""
-    email = payload.email or ""
-
-    # Tenta encontrar o subscriber pelo ID direto ou pelo email
+    # Prioridade 1: ref rastreado (subscriber_id injetado no link)
     found_id = None
-    if subscriber_id and subscriber_id in conv_manager.conversations:
-        found_id = subscriber_id
-    elif email:
-        found_id = conv_manager.find_by_email(email)
+    if payload.ref and payload.ref in conv_manager.conversations:
+        found_id = payload.ref
+    # Prioridade 2: subscriber_id direto
+    elif payload.subscriber_id and payload.subscriber_id in conv_manager.conversations:
+        found_id = payload.subscriber_id
+    # Prioridade 3: email
+    elif payload.email:
+        found_id = conv_manager.find_by_email(payload.email)
 
     if found_id:
-        conv_manager.mark_purchased(found_id, product_id=payload.product_id, buyer_email=email)
-        logger.info(f"[COMPRA] Venda confirmada para subscriber {found_id} (email: {email}, produto: {payload.product_id})")
+        conv_manager.mark_purchased(
+            found_id,
+            product_id=payload.product_id,
+            buyer_email=payload.email,
+        )
+        logger.info(f"[COMPRA] ✅ Venda confirmada → subscriber {found_id} | ref={payload.ref} | email={payload.email} | produto={payload.product_id}")
         return {"message": "compra registrada", "subscriber_id": found_id}
 
-    logger.warning(f"[COMPRA] Não encontrou subscriber para email={email} id={subscriber_id}")
-    return {"message": "subscriber não encontrado — compra não vinculada", "email": email}
+    logger.warning(f"[COMPRA] ⚠️ Não encontrou subscriber | ref={payload.ref} | email={payload.email}")
+    return {"message": "subscriber não encontrado", "ref": payload.ref, "email": payload.email}
 
 
 # ─── Follow-up de não-compradores ────────────────────────────────────────────
@@ -363,8 +376,19 @@ def reset_conversation(subscriber_id: str):
     raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
 
-def _build_response(text: str) -> JSONResponse:
+def _inject_tracking(text: str, subscriber_id: str) -> str:
+    """Adiciona ?ref=SUBSCRIBER_ID em qualquer link Greenn gerado pelo Claude."""
+    for product in PRODUCTS.values():
+        base = product["link"].split("?")[0]
+        if base in text:
+            text = text.replace(base, f"{base}?ref={subscriber_id}")
+    return text
+
+
+def _build_response(text: str, subscriber_id: str = "") -> JSONResponse:
     safe = re.sub(r"\{\{[^}]*\}\}", "", text).strip()
+    if subscriber_id:
+        safe = _inject_tracking(safe, subscriber_id)
     parts = [p.strip() for p in safe.split("\n\n") if p.strip()]
     msgs = [{"type": "text", "text": p} for p in parts] or [{"type": "text", "text": safe}]
     return JSONResponse({
