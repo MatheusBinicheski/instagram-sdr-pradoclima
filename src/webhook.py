@@ -227,7 +227,7 @@ def _build_response(text: str) -> JSONResponse:
     msgs = [{"type": "text", "text": p} for p in parts] or [{"type": "text", "text": safe}]
     return JSONResponse({
         "version": "v2",
-        "content": {"messages": msgs, "actions": [], "quick_replies": []},
+        "content": {"type": "instagram", "messages": msgs, "actions": [], "quick_replies": []},
     })
 
 
