@@ -451,6 +451,65 @@ def remarketing_send(slug: str):
     return results
 
 
+# ─── Remarketing geral (todos os contatos menos excluídos) ───────────────────
+
+REMARKETING_BLOCKLIST = {"paulo roberto", "lindival neto", "lilian queiroz"}
+
+
+@app.get("/remarketing/all/preview")
+def remarketing_all_preview():
+    """Lista todos que vão receber o remarketing geral (exceto bloqueados)."""
+    leads = [
+        c for c in conv_manager.conversations.values()
+        if c.get("status") != "vendido"
+        and c.get("user_name", "").lower().strip() not in REMARKETING_BLOCKLIST
+    ]
+    return {
+        "produto": PRODUCTS["o_mapa_convencer"]["name"],
+        "total": len(leads),
+        "bloqueados": list(REMARKETING_BLOCKLIST),
+        "leads": [{"user_id": l["user_id"], "user_name": l["user_name"]} for l in leads],
+    }
+
+
+@app.post("/remarketing/all/send")
+def remarketing_all_send():
+    """Envia remarketing do Mapa para Convencer para todos os contatos, exceto os 3 bloqueados."""
+    if not agent or not reactivation_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    product = PRODUCTS["o_mapa_convencer"]
+    leads = [
+        c for c in conv_manager.conversations.values()
+        if c.get("status") != "vendido"
+        and c.get("user_name", "").lower().strip() not in REMARKETING_BLOCKLIST
+    ]
+    results = {"produto": product["name"], "total": len(leads), "sent": 0, "failed": 0, "bloqueados": list(REMARKETING_BLOCKLIST)}
+
+    for lead in leads:
+        user_id = lead["user_id"]
+        user_name = lead["user_name"]
+        tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
+
+        try:
+            message = agent.generate_remarketing_message(
+                user_name=user_name,
+                product_name=product["name"],
+                product_link=tracked_link,
+            )
+            if reactivation_svc._send_manychat_dm(user_id, message):
+                conv_manager.add_message(user_id, "assistant", message)
+                results["sent"] += 1
+                logger.info(f"[REMARKETING GERAL] → {user_name} ({user_id})")
+            else:
+                results["failed"] += 1
+        except Exception as e:
+            logger.error(f"[REMARKETING GERAL] Erro para {user_name}: {e}")
+            results["failed"] += 1
+
+    return results
+
+
 @app.get("/debug/claude")
 def debug_claude():
     """Testa conexão com Claude API e retorna erro detalhado se falhar."""
