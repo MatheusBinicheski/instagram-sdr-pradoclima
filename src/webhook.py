@@ -385,6 +385,68 @@ def non_buyer_followup_pending():
     }
 
 
+# ─── Remarketing ─────────────────────────────────────────────────────────────
+
+PRODUCT_SLUG = {
+    "mcc20": "o_mapa_convencer",
+    "arte20": "a_arte_de_precificar",
+}
+
+
+@app.get("/remarketing/{slug}/preview")
+def remarketing_preview(slug: str):
+    """Lista quem vai receber o remarketing antes de disparar."""
+    product_id = PRODUCT_SLUG.get(slug.lower())
+    if not product_id:
+        raise HTTPException(status_code=404, detail=f"Produto '{slug}' não encontrado. Use: mcc20 ou arte20")
+    leads = conv_manager.get_non_buyers_by_product(product_id)
+    return {
+        "produto": PRODUCTS[product_id]["name"],
+        "total": len(leads),
+        "leads": [{"user_id": l["user_id"], "user_name": l["user_name"], "status": l.get("status")} for l in leads],
+    }
+
+
+@app.post("/remarketing/{slug}/send")
+def remarketing_send(slug: str):
+    """Dispara remarketing para todos que receberam o link mas não compraram."""
+    if not agent or not reactivation_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    product_id = PRODUCT_SLUG.get(slug.lower())
+    if not product_id:
+        raise HTTPException(status_code=404, detail=f"Produto '{slug}' não encontrado. Use: mcc20 ou arte20")
+
+    product = PRODUCTS[product_id]
+    leads = conv_manager.get_non_buyers_by_product(product_id)
+    results = {"produto": product["name"], "total": len(leads), "sent": 0, "failed": 0, "skipped": 0}
+
+    for lead in leads:
+        user_id = lead["user_id"]
+        user_name = lead["user_name"]
+
+        # Injeta o ref no link para rastreamento
+        tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
+
+        try:
+            message = agent.generate_remarketing_message(
+                user_name=user_name,
+                product_name=product["name"],
+                product_link=tracked_link,
+            )
+            if reactivation_svc._send_manychat_dm(user_id, message):
+                conv_manager.add_message(user_id, "assistant", message)
+                results["sent"] += 1
+                logger.info(f"[REMARKETING] {slug.upper()} → {user_name} ({user_id})")
+            else:
+                results["failed"] += 1
+        except Exception as e:
+            logger.error(f"[REMARKETING] Erro para {user_name}: {e}")
+            results["failed"] += 1
+
+    return results
+
+
 @app.get("/debug/claude")
 def debug_claude():
     """Testa conexão com Claude API e retorna erro detalhado se falhar."""

@@ -290,6 +290,30 @@ class SalesAgent:
         )
         return response.content[0].text.strip()
 
+    def generate_remarketing_message(
+        self,
+        user_name: str,
+        product_name: str,
+        product_link: str,
+    ) -> str:
+        prompt = (
+            f"Prospect: {user_name}\n"
+            f"Produto: {product_name}\n"
+            f"Link: {product_link}\n\n"
+            "Crie uma mensagem de remarketing curta e direta. "
+            "A pessoa demonstrou interesse mas não comprou ainda. "
+            "Reforce a dor principal do produto em 1 frase. "
+            "Mande o link e a garantia de 7 dias. "
+            "Máximo 3 frases. Tom Eduardo Prado — direto, sem enrolação."
+        )
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=120,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+
     def should_send_proactive_dm(self, follower_bio: str, follower_name: str) -> tuple[bool, str]:
         """Decide se deve enviar DM proativa para um seguidor baseado no perfil."""
         prompt = (

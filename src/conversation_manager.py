@@ -248,6 +248,14 @@ class ConversationManager:
         last_dt = datetime.fromisoformat(last)
         return datetime.now() - last_dt > timedelta(minutes=cooldown_minutes)
 
+    def get_non_buyers_by_product(self, product_id: str) -> list[dict]:
+        """Retorna todos que receberam o link de um produto mas não compraram."""
+        return [
+            conv for conv in self.conversations.values()
+            if conv.get("product_recommended") == product_id
+            and conv.get("status") not in ("vendido",)
+        ]
+
     def get_stats(self) -> dict:
         total = len(self.conversations)
         by_stage = {}
