@@ -397,6 +397,46 @@ PRODUCT_SLUG = {
 }
 
 
+class ManualRemarketingPayload(BaseModel):
+    subscriber_ids: list[str]
+    product: Optional[str] = "mcc20"  # mcc20 | arte20
+
+
+@app.post("/remarketing/manual/send")
+def remarketing_manual_send(payload: ManualRemarketingPayload):
+    """Dispara remarketing para uma lista manual de subscriber_ids do ManyChat."""
+    if not agent or not reactivation_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    product_id = PRODUCT_SLUG.get(payload.product.lower(), "o_mapa_convencer")
+    product = PRODUCTS[product_id]
+
+    ids = [sid.strip() for sid in payload.subscriber_ids if sid.strip()]
+    results = {"produto": product["name"], "total": len(ids), "sent": 0, "failed": 0}
+
+    for user_id in ids:
+        tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
+        try:
+            message = agent.generate_remarketing_message(
+                user_name="amigo",
+                product_name=product["name"],
+                product_link=tracked_link,
+            )
+            if reactivation_svc._send_manychat_dm(user_id, message):
+                conv_manager.get_or_create(user_id, user_id)
+                conv_manager.add_message(user_id, "assistant", message)
+                conv_manager.mark_link_sent(user_id, product_id)
+                results["sent"] += 1
+                logger.info(f"[REMARKETING MANUAL] → {user_id}")
+            else:
+                results["failed"] += 1
+        except Exception as e:
+            logger.error(f"[REMARKETING MANUAL] Erro para {user_id}: {e}")
+            results["failed"] += 1
+
+    return results
+
+
 def _get_remarketing_leads(slug: str) -> tuple[dict, list]:
     """Retorna (product, leads) para o slug. 'broadcast' = todos os contatos exceto bloqueados."""
     if slug == "broadcast":
@@ -603,55 +643,6 @@ def debug_manychat():
                 results[key] = {"status": r.status_code, "body": r.text[:300]}
             except Exception as e:
                 results[key] = {"error": str(e)}
-    return results
-
-
-class ManualRemarketingPayload(BaseModel):
-    subscriber_ids: list[str]
-    product: Optional[str] = "mcc20"  # mcc20 | arte20
-
-
-@app.post("/remarketing/manual/send")
-def remarketing_manual_send(payload: ManualRemarketingPayload):
-    """
-    Dispara remarketing para uma lista manual de subscriber_ids do ManyChat.
-    Use quando o ManyChat API não retorna subscribers ou conversations.json foi zerado.
-
-    Como obter os IDs:
-    1. ManyChat → Audience → Exportar CSV
-    2. Copiar IDs da coluna 'id' e passar aqui
-
-    Body: {"subscriber_ids": ["id1", "id2", ...], "product": "mcc20"}
-    """
-    if not agent or not reactivation_svc:
-        raise HTTPException(status_code=503, detail="Bot não inicializado.")
-
-    product_id = PRODUCT_SLUG.get(payload.product.lower(), "o_mapa_convencer")
-    product = PRODUCTS[product_id]
-
-    ids = [sid.strip() for sid in payload.subscriber_ids if sid.strip()]
-    results = {"produto": product["name"], "total": len(ids), "sent": 0, "failed": 0, "bloqueados": 0}
-
-    for user_id in ids:
-        tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
-        try:
-            message = agent.generate_remarketing_message(
-                user_name="amigo",
-                product_name=product["name"],
-                product_link=tracked_link,
-            )
-            if reactivation_svc._send_manychat_dm(user_id, message):
-                conv_manager.get_or_create(user_id, user_id)
-                conv_manager.add_message(user_id, "assistant", message)
-                conv_manager.mark_link_sent(user_id, product_id)
-                results["sent"] += 1
-                logger.info(f"[REMARKETING MANUAL] → {user_id}")
-            else:
-                results["failed"] += 1
-        except Exception as e:
-            logger.error(f"[REMARKETING MANUAL] Erro para {user_id}: {e}")
-            results["failed"] += 1
-
     return results
 
 
