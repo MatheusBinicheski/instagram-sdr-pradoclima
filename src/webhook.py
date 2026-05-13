@@ -201,6 +201,14 @@ async def manychat_webhook(payload: ManyChatPayload):
         if link_sent:
             conv_manager.mark_link_sent(user_id, link_sent)
 
+        # Tag no ManyChat em background — não bloqueia a resposta
+        if reactivation_svc:
+            import asyncio
+            asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: reactivation_svc.add_manychat_tag(user_id, "bot_interagiu")
+            )
+
         logger.info(f"[DM] Resposta ({current_stage}): '{response_text[:80]}'")
         return _build_response(response_text, subscriber_id=user_id)
 
@@ -318,6 +326,9 @@ async def greenn_purchase_webhook(payload: GreennPurchasePayload):
             product_id=payload.product_id,
             buyer_email=payload.email,
         )
+        if reactivation_svc:
+            reactivation_svc.remove_manychat_tag(found_id, "bot_interagiu")
+            reactivation_svc.add_manychat_tag(found_id, "bot_comprou")
         logger.info(f"[COMPRA] ✅ Venda confirmada → subscriber {found_id} | ref={payload.ref} | email={payload.email} | produto={payload.product_id}")
         return {"message": "compra registrada", "subscriber_id": found_id}
 
@@ -740,6 +751,72 @@ def debug_claude():
         return {"status": "ok", "response": result.content[0].text.strip()}
     except Exception as e:
         return {"status": "error", "type": type(e).__name__, "detail": str(e)}
+
+
+@app.get("/report/non-buyers")
+def report_non_buyers(hours: int = 24):
+    """
+    Lista quem interagiu nas últimas N horas e não comprou.
+    Fonte 1: conversations.json (quando existe)
+    Fonte 2: tag bot_interagiu no ManyChat (persiste mesmo após redeploy)
+    """
+    from datetime import datetime, timedelta
+    cutoff = datetime.now() - timedelta(hours=hours)
+    results = []
+
+    # Fonte 1: dados locais
+    for conv in conv_manager.conversations.values():
+        if conv.get("status") == "vendido":
+            continue
+        last = conv.get("last_user_message_at") or conv.get("created_at")
+        if not last:
+            continue
+        try:
+            if datetime.fromisoformat(last) >= cutoff:
+                results.append({
+                    "user_id": conv["user_id"],
+                    "user_name": conv.get("user_name"),
+                    "stage": conv.get("stage"),
+                    "produto_recebido": conv.get("product_recommended"),
+                    "link_enviado": conv.get("link_sent", False),
+                    "fonte": "local",
+                })
+        except Exception:
+            pass
+
+    # Fonte 2: tag bot_interagiu no ManyChat (busca por nome genérico para listar)
+    manychat_ids = set(r["user_id"] for r in results)
+    if reactivation_svc and Config.MANYCHAT_API_KEY:
+        import httpx
+        headers = {"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}"}
+        try:
+            with httpx.Client(timeout=10) as client:
+                r = client.get(
+                    "https://api.manychat.com/fb/subscriber/findByName",
+                    headers=headers,
+                    params={"name": " "},
+                )
+                if r.status_code == 200:
+                    for sub in r.json().get("data", []):
+                        tags = [t["name"] for t in sub.get("tags", [])]
+                        if "bot_interagiu" in tags and str(sub["id"]) not in manychat_ids:
+                            results.append({
+                                "user_id": str(sub["id"]),
+                                "user_name": sub.get("name") or sub.get("first_name"),
+                                "ig_username": sub.get("ig_username"),
+                                "stage": "desconhecido",
+                                "produto_recebido": None,
+                                "link_enviado": None,
+                                "fonte": "manychat_tag",
+                            })
+        except Exception as e:
+            logger.warning(f"[REPORT] Erro ao buscar ManyChat tags: {e}")
+
+    return {
+        "periodo_horas": hours,
+        "total_nao_compradores": len(results),
+        "leads": results,
+    }
 
 
 @app.get("/stats")

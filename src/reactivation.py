@@ -78,6 +78,42 @@ class ReactivationService:
         logger.info(f"[MANYCHAT] Total de subscribers carregados: {len(subscribers)}")
         return subscribers
 
+    def add_manychat_tag(self, subscriber_id: str, tag_name: str) -> bool:
+        """Adiciona uma tag a um subscriber no ManyChat via API."""
+        if not self.manychat_key:
+            return False
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.post(
+                    f"{MANYCHAT_API}/fb/subscriber/addTag",
+                    headers={"Authorization": f"Bearer {self.manychat_key}", "Content-Type": "application/json"},
+                    json={"subscriber_id": subscriber_id, "tag_name": tag_name},
+                )
+                if resp.status_code < 400:
+                    logger.info(f"[MANYCHAT TAG] +{tag_name} → {subscriber_id}")
+                    return True
+                logger.warning(f"[MANYCHAT TAG] Falha {resp.status_code} ao adicionar {tag_name} em {subscriber_id}: {resp.text[:150]}")
+                return False
+        except Exception as e:
+            logger.error(f"[MANYCHAT TAG] Erro: {e}")
+            return False
+
+    def remove_manychat_tag(self, subscriber_id: str, tag_name: str) -> bool:
+        """Remove uma tag de um subscriber no ManyChat via API."""
+        if not self.manychat_key:
+            return False
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.post(
+                    f"{MANYCHAT_API}/fb/subscriber/removeTag",
+                    headers={"Authorization": f"Bearer {self.manychat_key}", "Content-Type": "application/json"},
+                    json={"subscriber_id": subscriber_id, "tag_name": tag_name},
+                )
+                return resp.status_code < 400
+        except Exception as e:
+            logger.error(f"[MANYCHAT TAG] Erro ao remover: {e}")
+            return False
+
     def _send_manychat_dm(self, subscriber_id: str, text: str) -> bool:
         if not self.manychat_key:
             logger.warning("MANYCHAT_API_KEY não configurada. DM não enviada.")
