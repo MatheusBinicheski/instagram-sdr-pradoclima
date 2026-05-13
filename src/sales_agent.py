@@ -314,6 +314,58 @@ class SalesAgent:
         )
         return response.content[0].text.strip()
 
+    def generate_influencer_followup(
+        self,
+        user_name: str,
+        gift_link: str,
+        gender: str = "unknown",
+        attempt: int = 1,
+    ) -> str:
+        treatment = "parceiro" if gender != "female" else "parceira"
+        tones = {
+            1: f"Lembrete leve sobre o presente enviado. Pergunta se chegou a ver. Máximo 2 frases.",
+            2: f"Reforça o valor do presente e o convite para conectar. Máximo 2 frases.",
+            3: f"Última tentativa. Tom de oportunidade se fechando. Máximo 1 frase.",
+        }
+        tone = tones.get(attempt, tones[1])
+        prompt = (
+            f"Influenciador: {user_name} ({treatment})\n"
+            f"Link do presente: {gift_link}\n"
+            f"Tentativa de follow-up número: {attempt}\n\n"
+            f"{tone}\n\n"
+            "Escreva no tom do Eduardo Prado. Genuíno, sem pressão excessiva."
+        )
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=80,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+
+    def generate_hub_prospect_dm(
+        self,
+        user_name: str,
+        bio: str,
+        gender: str = "unknown",
+    ) -> str:
+        treatment = "parceiro" if gender != "female" else "parceira"
+        prompt = (
+            f"Prospect empresário: {user_name} ({treatment})\n"
+            f"Bio do Instagram: {bio[:200]}\n\n"
+            "Gere uma DM de prospecção sobre o HUB Global Business do Eduardo Prado. "
+            "Contextualize para o nicho ou cargo da pessoa baseado na bio. "
+            "Seja direto, no tom do Eduardo, máximo 3 frases. "
+            "Não mande link ainda — o objetivo é abrir conversa."
+        )
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=120,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+
     def should_send_proactive_dm(self, follower_bio: str, follower_name: str) -> tuple[bool, str]:
         """Decide se deve enviar DM proativa para um seguidor baseado no perfil."""
         prompt = (
