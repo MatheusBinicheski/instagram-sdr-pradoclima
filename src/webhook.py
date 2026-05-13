@@ -566,30 +566,43 @@ def remarketing_broadcast_send():
 @app.get("/debug/manychat")
 def debug_manychat():
     """Testa endpoints do ManyChat com a key real configurada no Railway."""
-    if not reactivation_svc or not Config.MANYCHAT_API_KEY:
+    if not Config.MANYCHAT_API_KEY:
         return {"status": "error", "detail": "MANYCHAT_API_KEY não configurada"}
     import httpx
     headers = {"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}"}
     results = {}
     endpoints = [
-        ("GET", "fb/page/getInfo", {}),
-        ("GET", "fb/tag/getList", {}),
-        ("GET", "fb/subscriber/findByName", {"name": "a"}),
-        ("GET", "fb/subscriber/getAll", {"count": 5}),
-        ("GET", "fb/subscriber/getSubscribers", {"count": 5}),
-        ("GET", "fb/audience/getAudiences", {}),
-        ("POST", "fb/subscriber/findByName", {"name": "a"}),
+        # Confirmados
+        ("GET",  "fb/page/getInfo",                  {}),
+        # Subscribers — prefixo fb
+        ("GET",  "fb/subscriber/getAll",              {"count": 5}),
+        ("GET",  "fb/subscriber/search",              {"name": "a"}),
+        ("POST", "fb/subscriber/search",              {"name": "a"}),
+        ("GET",  "fb/subscriber/findByName",          {"name": "a"}),
+        ("POST", "fb/subscriber/findByName",          {"name": "a"}),
+        # Subscribers — prefixo ig (Instagram)
+        ("GET",  "ig/subscriber/getAll",              {"count": 5}),
+        ("GET",  "ig/subscriber/search",              {"name": "a"}),
+        ("POST", "ig/subscriber/search",              {"name": "a"}),
+        # Conversas / histórico
+        ("GET",  "fb/subscriber/getConversations",    {}),
+        ("GET",  "ig/conversations",                  {}),
+        ("GET",  "ig/subscriber/getConversations",    {}),
+        # Tags / segments
+        ("GET",  "fb/tag/getList",                    {}),
+        ("GET",  "ig/tag/getList",                    {}),
     ]
     with httpx.Client(timeout=10) as client:
         for method, path, params in endpoints:
+            key = f"{method} {path}"
             try:
                 if method == "GET":
                     r = client.get(f"https://api.manychat.com/{path}", headers=headers, params=params)
                 else:
                     r = client.post(f"https://api.manychat.com/{path}", headers=headers, json=params)
-                results[path] = {"status": r.status_code, "body": r.text[:300]}
+                results[key] = {"status": r.status_code, "body": r.text[:300]}
             except Exception as e:
-                results[path] = {"error": str(e)}
+                results[key] = {"error": str(e)}
     return results
 
 
