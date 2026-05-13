@@ -681,6 +681,44 @@ def subscriber_search(name: str):
     return {"status": r.status_code, "data": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:500]}
 
 
+@app.get("/debug/send/{subscriber_id}")
+def debug_send(subscriber_id: str):
+    """Testa variações do payload de envio do ManyChat para um subscriber_id."""
+    import httpx
+    headers = {"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}", "Content-Type": "application/json"}
+    text = "Teste de envio — pode ignorar."
+    results = {}
+
+    variants = {
+        "ig_with_type": {
+            "url": "https://api.manychat.com/ig/sending/sendContent",
+            "payload": {"subscriber_id": subscriber_id, "data": {"version": "v2", "content": {"type": "instagram", "messages": [{"type": "text", "text": text}], "actions": [], "quick_replies": []}}},
+        },
+        "ig_without_type": {
+            "url": "https://api.manychat.com/ig/sending/sendContent",
+            "payload": {"subscriber_id": subscriber_id, "data": {"version": "v2", "content": {"messages": [{"type": "text", "text": text}], "actions": [], "quick_replies": []}}},
+        },
+        "fb_with_type": {
+            "url": "https://api.manychat.com/fb/sending/sendContent",
+            "payload": {"subscriber_id": subscriber_id, "data": {"version": "v2", "content": {"type": "instagram", "messages": [{"type": "text", "text": text}], "actions": [], "quick_replies": []}}},
+        },
+        "fb_without_type": {
+            "url": "https://api.manychat.com/fb/sending/sendContent",
+            "payload": {"subscriber_id": subscriber_id, "data": {"version": "v2", "content": {"messages": [{"type": "text", "text": text}], "actions": [], "quick_replies": []}}},
+        },
+    }
+
+    with httpx.Client(timeout=10) as client:
+        for name, v in variants.items():
+            try:
+                r = client.post(v["url"], headers=headers, json=v["payload"])
+                results[name] = {"status": r.status_code, "body": r.text[:300]}
+            except Exception as e:
+                results[name] = {"error": str(e)}
+
+    return results
+
+
 @app.get("/debug/claude")
 def debug_claude():
     """Testa conexão com Claude API e retorna erro detalhado se falhar."""
