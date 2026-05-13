@@ -667,6 +667,20 @@ def debug_manychat():
     return results
 
 
+@app.get("/subscriber/search")
+def subscriber_search(name: str):
+    """Busca subscriber no ManyChat pelo nome. Ex: /subscriber/search?name=Fabricio"""
+    import httpx
+    headers = {"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}"}
+    with httpx.Client(timeout=10) as client:
+        r = client.get(
+            "https://api.manychat.com/fb/subscriber/findByName",
+            headers=headers,
+            params={"name": name},
+        )
+    return {"status": r.status_code, "data": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:500]}
+
+
 @app.get("/debug/claude")
 def debug_claude():
     """Testa conexão com Claude API e retorna erro detalhado se falhar."""
