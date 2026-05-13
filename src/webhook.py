@@ -165,7 +165,14 @@ async def manychat_webhook(payload: ManyChatPayload):
             conv_manager.mark_link_sent(user_id, triggered_product)
             logger.info(f"[PRODUTO] {user_name} → produto='{triggered_product}' (keyword={bool(product_from_keyword)}, tag={bool(product_from_tag)})")
 
-        current_stage = agent.classify_message_stage(history_message, history)
+        # Avança estágio por heurística — sem segunda chamada ao Claude
+        current_stage = conv_manager.get_stage(user_id)
+        if triggered_product:
+            current_stage = "fechando"
+        elif current_stage == "conexao" and len(history) >= 2:
+            current_stage = "qualificando"
+        elif current_stage == "qualificando" and len(history) >= 6:
+            current_stage = "apresentando"
         conv_manager.update_stage(user_id, current_stage)
 
         extra_context = ""
