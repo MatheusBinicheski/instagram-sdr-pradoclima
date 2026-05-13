@@ -437,7 +437,7 @@ def remarketing_manual_send(payload: ManualRemarketingPayload):
             }
             with _httpx.Client(timeout=15) as _client:
                 _resp = _client.post(
-                    "https://api.manychat.com/ig/sending/sendContent",
+                    "https://api.manychat.com/fb/sending/sendContent",
                     headers={"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}", "Content-Type": "application/json"},
                     json=_payload,
                 )

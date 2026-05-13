@@ -97,7 +97,7 @@ class ReactivationService:
             }
             with httpx.Client(timeout=15) as client:
                 resp = client.post(
-                    f"{MANYCHAT_API}/ig/sending/sendContent",
+                    f"{MANYCHAT_API}/fb/sending/sendContent",
                     headers={
                         "Authorization": f"Bearer {self.manychat_key}",
                         "Content-Type": "application/json",
