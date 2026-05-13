@@ -402,7 +402,7 @@ class ManualRemarketingPayload(BaseModel):
     product: Optional[str] = "mcc20"  # mcc20 | arte20
 
 
-@app.post("/remarketing/manual/send")
+@app.post("/send-remarketing")
 def remarketing_manual_send(payload: ManualRemarketingPayload):
     """Dispara remarketing para uma lista manual de subscriber_ids do ManyChat."""
     if not agent or not reactivation_svc:
