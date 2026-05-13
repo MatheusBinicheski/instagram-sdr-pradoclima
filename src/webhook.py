@@ -573,9 +573,12 @@ def debug_manychat():
     results = {}
     endpoints = [
         ("GET", "fb/page/getInfo", {}),
+        ("GET", "fb/tag/getList", {}),
+        ("GET", "fb/subscriber/findByName", {"name": "a"}),
         ("GET", "fb/subscriber/getAll", {"count": 5}),
-        ("GET", "ig/subscriber/getAll", {"count": 5}),
-        ("POST", "fb/subscriber/findByName", {"name": "test"}),
+        ("GET", "fb/subscriber/getSubscribers", {"count": 5}),
+        ("GET", "fb/audience/getAudiences", {}),
+        ("POST", "fb/subscriber/findByName", {"name": "a"}),
     ]
     with httpx.Client(timeout=10) as client:
         for method, path, params in endpoints:
