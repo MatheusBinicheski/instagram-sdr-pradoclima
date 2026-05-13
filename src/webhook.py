@@ -412,7 +412,7 @@ def remarketing_manual_send(payload: ManualRemarketingPayload):
     product = PRODUCTS[product_id]
 
     ids = [sid.strip() for sid in payload.subscriber_ids if sid.strip()]
-    results = {"produto": product["name"], "total": len(ids), "sent": 0, "failed": 0}
+    results = {"produto": product["name"], "total": len(ids), "sent": 0, "failed": 0, "erros": []}
 
     for user_id in ids:
         tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
@@ -422,7 +422,26 @@ def remarketing_manual_send(payload: ManualRemarketingPayload):
                 product_name=product["name"],
                 product_link=tracked_link,
             )
-            if reactivation_svc._send_manychat_dm(user_id, message):
+            import httpx as _httpx
+            _payload = {
+                "subscriber_id": user_id,
+                "data": {
+                    "version": "v2",
+                    "content": {
+                        "type": "instagram",
+                        "messages": [{"type": "text", "text": message}],
+                        "actions": [],
+                        "quick_replies": [],
+                    },
+                },
+            }
+            with _httpx.Client(timeout=15) as _client:
+                _resp = _client.post(
+                    "https://api.manychat.com/ig/sending/sendContent",
+                    headers={"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}", "Content-Type": "application/json"},
+                    json=_payload,
+                )
+            if _resp.status_code < 400:
                 conv_manager.get_or_create(user_id, user_id)
                 conv_manager.add_message(user_id, "assistant", message)
                 conv_manager.mark_link_sent(user_id, product_id)
@@ -430,9 +449,11 @@ def remarketing_manual_send(payload: ManualRemarketingPayload):
                 logger.info(f"[REMARKETING MANUAL] → {user_id}")
             else:
                 results["failed"] += 1
+                results["erros"].append({"id": user_id, "status": _resp.status_code, "body": _resp.text[:200]})
         except Exception as e:
             logger.error(f"[REMARKETING MANUAL] Erro para {user_id}: {e}")
             results["failed"] += 1
+            results["erros"].append({"id": user_id, "erro": str(e)})
 
     return results
 
