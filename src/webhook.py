@@ -770,8 +770,20 @@ def recover_remarketing(product: str = "mcc20", days_ago: int = 1):
     target_date = (datetime.now() - timedelta(days=days_ago)).date()
     headers = {"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}"}
 
-    # Varre todos os prefixos para cobrir o máximo de subscribers
-    prefixes = list("abcdefghijklmnopqrstuvwxyz0123456789")
+    # Nomes mais comuns no Brasil + prefixos de 2 letras para cobertura ampla
+    prefixes = [
+        "jo", "ma", "an", "pe", "ca", "lu", "fe", "ro", "pa", "ri",
+        "vi", "le", "br", "ed", "ra", "al", "gu", "da", "ne", "re",
+        "th", "wa", "cl", "si", "fa", "mo", "di", "ti", "cr", "sa",
+        "fl", "me", "he", "de", "na", "la", "mi", "go", "ta", "gi",
+        "se", "co", "em", "ia", "so", "te", "ba", "ch", "fi", "he",
+        "João", "Maria", "José", "Ana", "Pedro", "Carlos", "Luiz",
+        "Paulo", "Marcos", "Lucas", "Gabriel", "Rafael", "Felipe",
+        "Rodrigo", "Bruno", "Eduardo", "Ricardo", "Gustavo", "Daniel",
+        "Matheus", "André", "Fernanda", "Juliana", "Camila", "Amanda",
+        "Patricia", "Renata", "Fabricio", "Roberto", "Diego", "Thiago",
+        "Marcelo", "Alexandre", "Anderson", "Leandro", "Sergio", "Flavio",
+    ]
     seen_ids: set = set()
     candidates = []
 
