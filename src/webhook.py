@@ -264,7 +264,7 @@ def reactivation_pending(hours: int = 24):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "bot": "Instagram SDR Bot — Eduardo Prado (@pradoclima)"}
+    return {"status": "ok", "bot": "Instagram SDR Bot — Eduardo Prado (@pradoclima)", "v": "5a6e430"}
 
 
 # ─── Webhook Greenn — confirmação de compra ──────────────────────────────────
