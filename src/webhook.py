@@ -753,6 +753,117 @@ def debug_claude():
         return {"status": "error", "type": type(e).__name__, "detail": str(e)}
 
 
+@app.post("/recover/remarketing")
+def recover_remarketing(product: str = "mcc20", days_ago: int = 1):
+    """
+    Varre ManyChat via findByName (prefixos A-Z+0-9), filtra por ig_last_interaction
+    na data correta e dispara remarketing para quem não tem tag bot_comprou.
+
+    GET /recover/remarketing?product=mcc20&days_ago=1  → ontem
+    """
+    if not agent or not reactivation_svc or not Config.MANYCHAT_API_KEY:
+        raise HTTPException(status_code=503, detail="Bot não inicializado ou MANYCHAT_API_KEY ausente.")
+
+    from datetime import datetime, timedelta
+    import httpx as _httpx
+
+    target_date = (datetime.now() - timedelta(days=days_ago)).date()
+    headers = {"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}"}
+
+    # Varre todos os prefixos para cobrir o máximo de subscribers
+    prefixes = list("abcdefghijklmnopqrstuvwxyz0123456789")
+    seen_ids: set = set()
+    candidates = []
+
+    with _httpx.Client(timeout=15) as client:
+        for prefix in prefixes:
+            try:
+                r = client.get(
+                    "https://api.manychat.com/fb/subscriber/findByName",
+                    headers=headers,
+                    params={"name": prefix},
+                )
+                if r.status_code != 200:
+                    continue
+                for sub in r.json().get("data", []):
+                    sid = str(sub.get("id", ""))
+                    if not sid or sid in seen_ids:
+                        continue
+                    seen_ids.add(sid)
+
+                    # Filtra por data de interação no Instagram
+                    ig_last = sub.get("ig_last_interaction") or sub.get("last_interaction")
+                    if not ig_last:
+                        continue
+                    try:
+                        sub_date = datetime.fromisoformat(ig_last.replace("Z", "+00:00")).date()
+                    except Exception:
+                        continue
+                    if sub_date != target_date:
+                        continue
+
+                    # Pula quem já comprou
+                    tags = {t["name"] for t in sub.get("tags", [])}
+                    if "bot_comprou" in tags:
+                        continue
+
+                    candidates.append({
+                        "id": sid,
+                        "name": sub.get("name") or sub.get("first_name") or "amigo",
+                        "ig_username": sub.get("ig_username", ""),
+                        "tags": list(tags),
+                    })
+            except Exception as e:
+                logger.warning(f"[RECOVER] Erro no prefixo '{prefix}': {e}")
+
+    if not candidates:
+        return {"data_alvo": str(target_date), "encontrados": 0, "mensagem": "Nenhum subscriber encontrado para essa data."}
+
+    product_id = PRODUCT_SLUG.get(product.lower(), "o_mapa_convencer")
+    prod = PRODUCTS[product_id]
+    results = {"data_alvo": str(target_date), "encontrados": len(candidates), "sent": 0, "failed": 0, "leads": []}
+
+    for c in candidates:
+        user_id = c["id"]
+        user_name = c["name"]
+        tracked_link = f"{prod['link'].split('?')[0]}?ref={user_id}"
+        try:
+            message = agent.generate_remarketing_message(
+                user_name=user_name,
+                product_name=prod["name"],
+                product_link=tracked_link,
+            )
+            payload = {
+                "subscriber_id": user_id,
+                "data": {"version": "v2", "content": {
+                    "type": "instagram",
+                    "messages": [{"type": "text", "text": message}],
+                    "actions": [], "quick_replies": [],
+                }},
+            }
+            with _httpx.Client(timeout=15) as client:
+                resp = client.post(
+                    "https://api.manychat.com/fb/sending/sendContent",
+                    headers={"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+            if resp.status_code < 400:
+                conv_manager.get_or_create(user_id, user_name)
+                conv_manager.add_message(user_id, "assistant", message)
+                conv_manager.mark_link_sent(user_id, product_id)
+                results["sent"] += 1
+                results["leads"].append({"id": user_id, "nome": user_name, "ig": c["ig_username"], "status": "enviado"})
+                logger.info(f"[RECOVER] Remarketing → @{c['ig_username']} ({user_id})")
+            else:
+                results["failed"] += 1
+                results["leads"].append({"id": user_id, "nome": user_name, "ig": c["ig_username"], "status": f"falha_{resp.status_code}"})
+        except Exception as e:
+            results["failed"] += 1
+            results["leads"].append({"id": user_id, "nome": user_name, "status": f"erro: {e}"})
+
+    return results
+
+
 @app.get("/report/non-buyers")
 def report_non_buyers(hours: int = 24):
     """
