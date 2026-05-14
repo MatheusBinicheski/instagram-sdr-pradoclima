@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
+from .sales_agent import STAGE_FALLBACKS
 
 from .sales_agent import SalesAgent
 from .conversation_manager import ConversationManager
@@ -48,6 +49,17 @@ async def startup():
         asyncio.create_task(_reactivation_loop())
         asyncio.create_task(_purchase_followup_loop())
         logger.info("Schedulers de reativação e follow-up de compra iniciados.")
+
+
+async def _tag_interagiu(user_id: str):
+    """Adiciona tag bot_interagiu no ManyChat sem bloquear o webhook."""
+    try:
+        if reactivation_svc:
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: reactivation_svc.add_manychat_tag(user_id, "bot_interagiu")
+            )
+    except Exception as e:
+        logger.warning(f"[TAG] Erro ao adicionar tag para {user_id}: {e}")
 
 
 async def _reactivation_loop():
@@ -185,15 +197,25 @@ async def manychat_webhook(payload: ManyChatPayload):
                 f"Depois faça UMA pergunta para continuar a conversa."
             )
 
-        response_text = agent.generate_dm_response(
-            user_name=user_name,
-            user_message=message or history_message,
-            conversation_history=history,
-            stage=current_stage,
-            attachment_type=attachment_type,
-            attachment_url=attachment_url,
-            extra_context=extra_context,
-        )
+        try:
+            response_text = await asyncio.wait_for(
+                agent.generate_dm_response_async(
+                    user_name=user_name,
+                    user_message=message or history_message,
+                    conversation_history=history,
+                    stage=current_stage,
+                    attachment_type=attachment_type,
+                    attachment_url=attachment_url,
+                    extra_context=extra_context,
+                ),
+                timeout=4.5,
+            )
+        except asyncio.TimeoutError:
+            response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
+            logger.warning(f"[DM] Timeout Claude para {user_name} — usando fallback estágio '{current_stage}'")
+        except Exception as claude_err:
+            response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
+            logger.error(f"[DM] Erro Claude para {user_name}: {claude_err}")
 
         conv_manager.add_message(user_id, "assistant", response_text)
 
@@ -203,18 +225,14 @@ async def manychat_webhook(payload: ManyChatPayload):
 
         # Tag no ManyChat em background — não bloqueia a resposta
         if reactivation_svc:
-            import asyncio
-            asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: reactivation_svc.add_manychat_tag(user_id, "bot_interagiu")
-            )
+            asyncio.create_task(_tag_interagiu(user_id))
 
         logger.info(f"[DM] Resposta ({current_stage}): '{response_text[:80]}'")
         return _build_response(response_text, subscriber_id=user_id)
 
     except Exception as e:
-        logger.error(f"[DM] Erro ao processar mensagem de {user_name} ({user_id}): {e}", exc_info=True)
-        fallback = "Oi! Recebi sua mensagem. Me manda o que você precisa que eu te ajudo."
+        logger.error(f"[DM] Erro crítico para {user_name} ({user_id}): {e}", exc_info=True)
+        fallback = STAGE_FALLBACKS["conexao"]
         return _build_response(fallback, subscriber_id=user_id)
 
 

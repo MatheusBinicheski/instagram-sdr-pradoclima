@@ -11,6 +11,16 @@ from .products import PRODUCTS, PRODUCT_LIST_TEXT
 
 logger = logging.getLogger(__name__)
 
+# Fallbacks por estágio — usados quando Claude não responde a tempo
+STAGE_FALLBACKS = {
+    "conexao":      "Me conta: qual é o maior problema do seu negócio hoje?",
+    "qualificando": "Entendi. E quanto isso tá custando pra você por mês, na prática?",
+    "apresentando": "Olha, tenho algo exato pra resolver isso. Me dá um segundo.",
+    "objecao":      "Entendo a dúvida. Me fala o que travou — preço, tempo ou outra coisa?",
+    "fechando":     "Ainda tá na dúvida? Me conta o que impediu de fechar.",
+    "frio":         "Oi! Vi que você passou por aqui antes. Posso te ajudar com algo?",
+}
+
 SYSTEM_PROMPT = """Você é o Eduardo Prado. Fale em primeira pessoa, como se fosse o próprio Eduardo respondendo no Instagram.
 
 Quem é Eduardo Prado: empresário desde 1989, comecei como lixador de geladeira e construí a maior empresa de refrigeração e climatização da minha região. Hoje tenho negócio em 15 estados, 4.700 alunos em 18 países e ajudo donos de empresa a vender mais e lucrar de verdade. Pré-candidato a Deputado Federal.
@@ -66,6 +76,7 @@ Quando não souber preço ou data exata, fala que vai confirmar e redireciona pa
 class SalesAgent:
     def __init__(self, api_key: str):
         self.client = anthropic.Anthropic(api_key=api_key)
+        self.async_client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = "claude-sonnet-4-6"
 
     def _identify_best_product(self, message: str) -> Optional[str]:
@@ -148,6 +159,66 @@ class SalesAgent:
         messages.append({"role": "user", "content": user_content})
 
         response = self.client.messages.create(
+            model=self.model,
+            max_tokens=200,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+        )
+        return response.content[0].text.strip()
+
+    async def generate_dm_response_async(
+        self,
+        user_name: str,
+        user_message: str,
+        conversation_history: list[dict],
+        stage: str = "conexao",
+        attachment_type: str = "",
+        attachment_url: str = "",
+        extra_context: str = "",
+    ) -> str:
+        """Versão assíncrona de generate_dm_response — não bloqueia o event loop."""
+        product_hint = self._identify_best_product(user_message)
+        product_context = ""
+        if product_hint:
+            p = PRODUCTS[product_hint]
+            product_context = (
+                f"\n\nDICA: Pela mensagem, o produto mais indicado parece ser '{p['name']}' "
+                f"(link: {p['link']}). Considere apresentá-lo se fizer sentido no contexto."
+            )
+
+        stage_instructions = {
+            "conexao": "Esta é a primeira mensagem. Crie conexão e faça UMA pergunta sobre o negócio da pessoa.",
+            "qualificando": "Você está qualificando. Continue explorando a dor principal com perguntas específicas.",
+            "apresentando": "Apresente o produto mais adequado focando na transformação prática e resultado real.",
+            "objecao": "A pessoa tem uma objeção. Trate com empatia, use prova real e reforce a garantia de 7 dias.",
+            "fechando": "O lead está quente. Seja direto, gere urgência e envie o link de pagamento.",
+        }
+        stage_text = stage_instructions.get(stage, stage_instructions["conexao"])
+
+        messages = [{"role": t["role"], "content": t["content"]} for t in conversation_history[-8:]]
+
+        base_prompt = (
+            f"Nome do seguidor: {user_name}\n"
+            f"Estágio da conversa: {stage_text}"
+            f"{product_context}\n"
+            f"{extra_context + chr(10) if extra_context else ''}\n"
+            f"Gere uma resposta natural, envolvente e que avance a conversa para a venda."
+        )
+
+        if attachment_type == "image" and attachment_url:
+            user_content = [
+                {"type": "image", "source": {"type": "url", "url": attachment_url}},
+                {"type": "text", "text": f"{base_prompt}\n\nMensagem junto à imagem: {user_message or '(sem texto)'}\nAnalise a imagem e responda de forma calorosa."},
+            ]
+        elif attachment_type in ("audio", "video"):
+            tipo = "áudio" if attachment_type == "audio" else "vídeo"
+            user_content = f"{base_prompt}\n\nO seguidor enviou um {tipo}. Reconheça com empatia e peça para escrever o que quer dizer."
+        else:
+            user_content = f"Mensagem recebida: {user_message}\n\n{base_prompt}"
+
+        messages.append({"role": "user", "content": user_content})
+
+        response = await self.async_client.messages.create(
             model=self.model,
             max_tokens=200,
             system=SYSTEM_PROMPT,
