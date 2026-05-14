@@ -26,6 +26,11 @@ agent: SalesAgent = None
 conv_manager: ConversationManager = None
 reactivation_svc: ReactivationService = None
 
+# Debounce: acumula mensagens rápidas e processa como bloco único
+DEBOUNCE_DELAY = 4  # segundos de silêncio antes de processar
+_debounce_tasks: dict[str, asyncio.Task] = {}
+_message_buffers: dict[str, list[dict]] = {}  # user_id → lista de payloads
+
 
 @app.on_event("startup")
 async def startup():
@@ -49,6 +54,121 @@ async def startup():
         asyncio.create_task(_reactivation_loop())
         asyncio.create_task(_purchase_followup_loop())
         logger.info("Schedulers de reativação e follow-up de compra iniciados.")
+
+
+async def _process_debounced(user_id: str):
+    """
+    Processa todas as mensagens acumuladas no buffer após DEBOUNCE_DELAY segundos.
+    Chamado como task — cancela e reagenda a cada nova mensagem do mesmo usuário.
+    """
+    await asyncio.sleep(DEBOUNCE_DELAY)
+
+    buffer = _message_buffers.pop(user_id, [])
+    if not buffer:
+        return
+
+    # Usa o payload mais recente para contexto; combina textos
+    last = buffer[-1]
+    user_name = last["user_name"]
+    attachment_type = last["attachment_type"]
+    attachment_url = last["attachment_url"]
+
+    texts = [b["message"] for b in buffer if b["message"]]
+    combined_message = " / ".join(texts) if texts else last["history_message"]
+    history_message = combined_message or last["history_message"]
+
+    logger.info(f"[DEBOUNCE] Processando {len(buffer)} msg(s) de {user_name} ({user_id}): '{combined_message[:80]}'")
+
+    try:
+        conv_manager.get_or_create(user_id, user_name)
+        history = conv_manager.get_history(user_id)
+        conv_manager.add_message(user_id, "user", history_message)
+
+        # Stage + keyword detection
+        triggered_product = last["triggered_product"]
+        product_from_keyword = last["product_from_keyword"]
+
+        if product_from_keyword:
+            keyword_label = "mcc20" if product_from_keyword == "o_mapa_convencer" else "arte20"
+            conv_manager.mark_keyword_triggered(user_id, keyword_label, product_from_keyword)
+        if triggered_product:
+            conv_manager.mark_link_sent(user_id, triggered_product)
+
+        current_stage = conv_manager.get_stage(user_id)
+        if triggered_product:
+            current_stage = "fechando"
+        elif current_stage == "conexao" and len(history) >= 2:
+            current_stage = "qualificando"
+        elif current_stage == "qualificando" and len(history) >= 6:
+            current_stage = "apresentando"
+        conv_manager.update_stage(user_id, current_stage)
+
+        extra_context = ""
+        if triggered_product:
+            p = PRODUCTS[triggered_product]
+            extra_context = (
+                f"AÇÃO OBRIGATÓRIA: O lead digitou uma palavra-chave de produto. "
+                f"Mande AGORA o link do '{p['name']}': {p['link']} "
+                f"Seja direto, mande o link já na primeira frase. "
+                f"Depois faça UMA pergunta para continuar a conversa."
+            )
+
+        try:
+            response_text = await asyncio.wait_for(
+                agent.generate_dm_response_async(
+                    user_name=user_name,
+                    user_message=combined_message or history_message,
+                    conversation_history=history,
+                    stage=current_stage,
+                    attachment_type=attachment_type,
+                    attachment_url=attachment_url,
+                    extra_context=extra_context,
+                ),
+                timeout=4.5,
+            )
+        except asyncio.TimeoutError:
+            response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
+            logger.warning(f"[DEBOUNCE] Timeout Claude para {user_name} — fallback '{current_stage}'")
+        except Exception as claude_err:
+            response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
+            logger.error(f"[DEBOUNCE] Erro Claude para {user_name}: {claude_err}")
+
+        conv_manager.add_message(user_id, "assistant", response_text)
+        link_sent = _detect_link_sent(response_text)
+        if link_sent:
+            conv_manager.mark_link_sent(user_id, link_sent)
+
+        # Envia via API (não via webhook response — o webhook já retornou vazio)
+        safe = re.sub(r"\{\{[^}]*\}\}", "", response_text).strip()
+        if user_id:
+            safe = _inject_tracking(safe, user_id)
+
+        import httpx as _httpx
+        parts = [p.strip() for p in safe.split("\n\n") if p.strip()] or [safe]
+        full_text = "\n\n".join(parts)
+        payload = {
+            "subscriber_id": user_id,
+            "data": {"version": "v2", "content": {
+                "type": "instagram",
+                "messages": [{"type": "text", "text": full_text}],
+                "actions": [], "quick_replies": [],
+            }},
+        }
+        async with _httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api.manychat.com/fb/sending/sendContent",
+                headers={"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                logger.error(f"[DEBOUNCE] ManyChat send erro {resp.status_code}: {resp.text[:200]}")
+            else:
+                logger.info(f"[DEBOUNCE] Resposta enviada via API para {user_name}")
+
+        asyncio.create_task(_tag_interagiu(user_id))
+
+    except Exception as e:
+        logger.error(f"[DEBOUNCE] Erro crítico para {user_name} ({user_id}): {e}", exc_info=True)
 
 
 async def _tag_interagiu(user_id: str):
@@ -155,85 +275,37 @@ async def manychat_webhook(payload: ManyChatPayload):
     else:
         history_message = message or "oi"
 
-    logger.info(f"[DM] {user_name} ({user_id}) [{attachment_type or 'text'}]: '{(message or attachment_url)[:80]}'")
-
     tag = _clean(payload.tag or "").lower()
     product_from_tag = TAG_TO_PRODUCT.get(tag)
     product_from_keyword = _detect_keyword_product(message)
-
-    # Keyword na mensagem tem prioridade sobre a tag
     triggered_product = product_from_keyword or product_from_tag
 
-    try:
-        conv_manager.get_or_create(user_id, user_name)
-        history = conv_manager.get_history(user_id)
-        conv_manager.add_message(user_id, "user", history_message)
+    logger.info(f"[DM] {user_name} ({user_id}) [{attachment_type or 'text'}]: '{(message or attachment_url)[:80]}'")
 
-        if product_from_keyword:
-            keyword_label = "mcc20" if product_from_keyword == "o_mapa_convencer" else "arte20"
-            conv_manager.mark_keyword_triggered(user_id, keyword_label, product_from_keyword)
+    # Acumula no buffer de debounce
+    if user_id not in _message_buffers:
+        _message_buffers[user_id] = []
+    _message_buffers[user_id].append({
+        "user_name": user_name,
+        "message": message,
+        "history_message": history_message,
+        "attachment_type": attachment_type,
+        "attachment_url": attachment_url,
+        "triggered_product": triggered_product,
+        "product_from_keyword": product_from_keyword,
+    })
 
-        if triggered_product:
-            conv_manager.mark_link_sent(user_id, triggered_product)
-            logger.info(f"[PRODUTO] {user_name} → produto='{triggered_product}' (keyword={bool(product_from_keyword)}, tag={bool(product_from_tag)})")
+    # Cancela task anterior e agenda nova (reinicia o timer)
+    existing = _debounce_tasks.get(user_id)
+    if existing and not existing.done():
+        existing.cancel()
+    _debounce_tasks[user_id] = asyncio.create_task(_process_debounced(user_id))
 
-        # Avança estágio por heurística — sem segunda chamada ao Claude
-        current_stage = conv_manager.get_stage(user_id)
-        if triggered_product:
-            current_stage = "fechando"
-        elif current_stage == "conexao" and len(history) >= 2:
-            current_stage = "qualificando"
-        elif current_stage == "qualificando" and len(history) >= 6:
-            current_stage = "apresentando"
-        conv_manager.update_stage(user_id, current_stage)
-
-        extra_context = ""
-        if triggered_product:
-            p = PRODUCTS[triggered_product]
-            extra_context = (
-                f"AÇÃO OBRIGATÓRIA: O lead digitou uma palavra-chave de produto. "
-                f"Mande AGORA o link do '{p['name']}': {p['link']} "
-                f"Seja direto, mande o link já na primeira frase. "
-                f"Depois faça UMA pergunta para continuar a conversa."
-            )
-
-        try:
-            response_text = await asyncio.wait_for(
-                agent.generate_dm_response_async(
-                    user_name=user_name,
-                    user_message=message or history_message,
-                    conversation_history=history,
-                    stage=current_stage,
-                    attachment_type=attachment_type,
-                    attachment_url=attachment_url,
-                    extra_context=extra_context,
-                ),
-                timeout=4.5,
-            )
-        except asyncio.TimeoutError:
-            response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
-            logger.warning(f"[DM] Timeout Claude para {user_name} — usando fallback estágio '{current_stage}'")
-        except Exception as claude_err:
-            response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
-            logger.error(f"[DM] Erro Claude para {user_name}: {claude_err}")
-
-        conv_manager.add_message(user_id, "assistant", response_text)
-
-        link_sent = _detect_link_sent(response_text)
-        if link_sent:
-            conv_manager.mark_link_sent(user_id, link_sent)
-
-        # Tag no ManyChat em background — não bloqueia a resposta
-        if reactivation_svc:
-            asyncio.create_task(_tag_interagiu(user_id))
-
-        logger.info(f"[DM] Resposta ({current_stage}): '{response_text[:80]}'")
-        return _build_response(response_text, subscriber_id=user_id)
-
-    except Exception as e:
-        logger.error(f"[DM] Erro crítico para {user_name} ({user_id}): {e}", exc_info=True)
-        fallback = STAGE_FALLBACKS["conexao"]
-        return _build_response(fallback, subscriber_id=user_id)
+    # Retorna vazio imediatamente — a resposta real chega via API após o delay
+    return JSONResponse({
+        "version": "v2",
+        "content": {"type": "instagram", "messages": [], "actions": [], "quick_replies": []},
+    })
 
 
 # ─── Comentários ────────────────────────────────────────────────────────────
