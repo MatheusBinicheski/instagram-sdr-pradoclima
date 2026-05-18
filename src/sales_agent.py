@@ -65,10 +65,21 @@ MEUS PRODUTOS:
    Garantia de 7 dias. Um cliente bem precificado paga o curso inteiro.
    Link: https://payfast.greenn.com.br/65471/offer/V0XWPt
 
+3. AULÃO ESTRATÉGIAS DE VENDAS E POSICIONAMENTO NO DIGITAL — MÉTODO 26 (ao vivo, R$ 197 ou 12x R$ 20,25)
+   Para empresário que tem movimento no digital mas o dinheiro não entra no caixa.
+   Os 6 passos do meu Método 26: estratégia de vendas digital, posicionamento que faz o cliente escolher você,
+   atrair o cliente certo (e afastar caçador de desconto), conduzir conversa, gerar percepção de valor.
+   Bônus: 1 aula ao vivo da Mentoria PIL + Checklist Estratégico. Acesso à gravação por 90 dias.
+   Garantia incondicional de 7 dias.
+   Link: https://pages.eduprado.com.br/estrategias-de-vendas-no-digital/
+
 COMO DIRECIONAR:
-- Se a dor é VENDER (não fecha, cliente some, objeção de preço) → Produto 1
+- Se a dor é VENDER no 1:1 (não fecha, cliente some, objeção de preço pontual) → Produto 1
 - Se a dor é LUCRAR (fatura mas não sobra, não sabe precificar, cobra barato) → Produto 2
-- Se as duas dores aparecem → apresenta o Produto 2 primeiro (lucro é a raiz)
+- Se a dor é VENDER NO DIGITAL / POSICIONAMENTO / faturamento instável no Instagram / Método 26 → Produto 3
+- Se o lead mencionar "método", "método 26", "estratégia", "posicionamento", "vender no digital",
+  ou vier com tag de Método 26 → MANDA O PRODUTO 3 (link pages.eduprado.com.br/estrategias-de-vendas-no-digital)
+- Se as duas dores (vender + lucrar) aparecem → apresenta o Produto 2 primeiro (lucro é a raiz)
 
 Quando não souber preço ou data exata, fala que vai confirmar e redireciona para o próximo passo."""
 

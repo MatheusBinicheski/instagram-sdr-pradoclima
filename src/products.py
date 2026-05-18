@@ -55,6 +55,40 @@ PRODUCTS = {
             "negócio", "empresa", "empresário", "empreendedor", "pequena empresa",
         ],
     },
+    "estrategias_vendas_digital": {
+        "name": "Aulão Estratégias de Vendas e Posicionamento no Digital (Método 26)",
+        "description": (
+            "Aulão online ao vivo do Eduardo Prado para empresário que tem movimento no digital "
+            "mas o dinheiro não entra no caixa. Em 1 noite de aula você aprende os 6 passos do Método 26: "
+            "estratégia de vendas digital, posicionamento que faz o cliente escolher você (e parar de pedir desconto), "
+            "como atrair o cliente certo, conduzir conversa, gerar percepção de valor e identificar o que trava o faturamento. "
+            "Vem com 1 aula ao vivo bônus da Mentoria PIL e o Checklist Estratégico. "
+            "Garantia incondicional de 7 dias. Acesso à gravação por 90 dias."
+        ),
+        "beneficios": [
+            "Estratégia de vendas digital que gera demanda real (não só engajamento)",
+            "Posicionamento diferenciado — você é escolhido, não comparado",
+            "Atrai o cliente certo e afasta o caçador de desconto",
+            "Conversas mais qualificadas e ciclo de venda mais curto",
+            "Mais previsibilidade e controle do faturamento — menos dependência de indicação",
+            "Bônus: 1 aula ao vivo da Mentoria PIL + Checklist Estratégico",
+        ],
+        "link": "https://pages.eduprado.com.br/estrategias-de-vendas-no-digital/",
+        "tipo": "aulao_ao_vivo",
+        "preco": "R$ 197,00 à vista ou 12x R$ 20,25",
+        "garantia": "7 dias",
+        "palavras_chave": [
+            "metodo26", "metodo 26", "método26", "método 26", "metodo", "método",
+            "estratégia", "estrategia", "estratégias", "estrategias",
+            "posicionamento", "posicionamento digital", "autoridade",
+            "vender no digital", "vendas no digital", "vendas digital",
+            "instagram não vende", "movimento no digital", "stories", "reels",
+            "instagram", "redes sociais", "marketing digital", "digital",
+            "aulão", "aulao", "aula ao vivo", "evento", "imersão",
+            "previsibilidade", "faturamento instável", "dependência de indicação",
+            "indicação", "engajamento que não converte",
+        ],
+    },
 }
 
 PRODUCT_LIST_TEXT = """
@@ -67,4 +101,8 @@ PRODUCT_LIST_TEXT = """
 2️⃣ *A Arte de Precificar*
    Planilhas automatizadas para precificar certo e lucrar de verdade — R$ 97
    👉 https://payfast.greenn.com.br/65471/offer/V0XWPt
+
+3️⃣ *Aulão Estratégias de Vendas e Posicionamento no Digital (Método 26)*
+   Os 6 passos para vender de verdade no digital — R$ 197 (12x R$ 20,25)
+   👉 https://pages.eduprado.com.br/estrategias-de-vendas-no-digital/
 """

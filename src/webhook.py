@@ -89,7 +89,11 @@ async def _process_debounced(user_id: str):
         product_from_keyword = last["product_from_keyword"]
 
         if product_from_keyword:
-            keyword_label = "mcc20" if product_from_keyword == "o_mapa_convencer" else "arte20"
+            keyword_label = {
+                "o_mapa_convencer": "mcc20",
+                "a_arte_de_precificar": "arte20",
+                "estrategias_vendas_digital": "metodo26",
+            }.get(product_from_keyword, product_from_keyword)
             conv_manager.mark_keyword_triggered(user_id, keyword_label, product_from_keyword)
         if triggered_product:
             conv_manager.mark_link_sent(user_id, triggered_product)
@@ -230,11 +234,16 @@ async def _purchase_followup_loop():
 TAG_TO_PRODUCT = {
     "open_checkout_mcc20": "o_mapa_convencer",
     "open_checkout_arte20": "a_arte_de_precificar",
+    "open_checkout_metodo26": "estrategias_vendas_digital",
+    "metodo26": "estrategias_vendas_digital",
+    "método26": "estrategias_vendas_digital",
 }
 
 KEYWORD_TO_PRODUCT = [
     (re.compile(r"\barte\s*20\b", re.IGNORECASE), "a_arte_de_precificar"),
     (re.compile(r"\bmcc\s*20\b", re.IGNORECASE), "o_mapa_convencer"),
+    (re.compile(r"\bm[eé]todo\s*26\b", re.IGNORECASE), "estrategias_vendas_digital"),
+    (re.compile(r"\bm[eé]todo\b", re.IGNORECASE), "estrategias_vendas_digital"),
 ]
 
 
@@ -242,6 +251,18 @@ def _detect_keyword_product(text: str) -> Optional[str]:
     for pattern, product_id in KEYWORD_TO_PRODUCT:
         if pattern.search(text):
             return product_id
+    return None
+
+
+def _detect_tag_product(tag: str) -> Optional[str]:
+    """Tag exata OU qualquer tag contendo 'metodo26'/'método26' → produto Método 26."""
+    if not tag:
+        return None
+    exact = TAG_TO_PRODUCT.get(tag)
+    if exact:
+        return exact
+    if "metodo26" in tag or "método26" in tag:
+        return "estrategias_vendas_digital"
     return None
 
 
@@ -276,7 +297,7 @@ async def manychat_webhook(payload: ManyChatPayload):
         history_message = message or "oi"
 
     tag = _clean(payload.tag or "").lower()
-    product_from_tag = TAG_TO_PRODUCT.get(tag)
+    product_from_tag = _detect_tag_product(tag)
     product_from_keyword = _detect_keyword_product(message)
     triggered_product = product_from_keyword or product_from_tag
 
@@ -502,6 +523,7 @@ def non_buyer_followup_pending():
 PRODUCT_SLUG = {
     "mcc20": "o_mapa_convencer",
     "arte20": "a_arte_de_precificar",
+    "metodo26": "estrategias_vendas_digital",
 }
 
 
@@ -1073,6 +1095,7 @@ def _detect_link_sent(text: str) -> Optional[str]:
     links = {
         "o_mapa_convencer": "payfast.greenn.com.br/66110",
         "a_arte_de_precificar": "payfast.greenn.com.br/65471",
+        "estrategias_vendas_digital": "pages.eduprado.com.br/estrategias-de-vendas-no-digital",
     }
     for product_id, fragment in links.items():
         if fragment in text:
