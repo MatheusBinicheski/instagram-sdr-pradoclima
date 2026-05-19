@@ -80,13 +80,19 @@ async def _process_debounced(user_id: str):
     logger.info(f"[DEBOUNCE] Processando {len(buffer)} msg(s) de {user_name} ({user_id}): '{combined_message[:80]}'")
 
     try:
-        conv_manager.get_or_create(user_id, user_name)
+        conv = conv_manager.get_or_create(user_id, user_name)
         history = conv_manager.get_history(user_id)
         conv_manager.add_message(user_id, "user", history_message)
 
         # Stage + keyword detection
         triggered_product = last["triggered_product"]
         product_from_keyword = last["product_from_keyword"]
+
+        # Produto já recomendado em mensagens anteriores (trava anti-troca-de-produto)
+        already_recommended = conv.get("product_recommended") if conv.get("link_sent") else None
+        locked_product = None
+        if not triggered_product and already_recommended and conv.get("status") != "vendido":
+            locked_product = already_recommended
 
         if product_from_keyword:
             keyword_label = {
@@ -100,7 +106,7 @@ async def _process_debounced(user_id: str):
             conv_manager.mark_link_sent(user_id, triggered_product)
 
         current_stage = conv_manager.get_stage(user_id)
-        if triggered_product:
+        if triggered_product or locked_product:
             current_stage = "fechando"
         elif current_stage == "conexao" and len(history) >= 2:
             current_stage = "qualificando"
@@ -115,7 +121,19 @@ async def _process_debounced(user_id: str):
                 f"AÇÃO OBRIGATÓRIA: O lead digitou uma palavra-chave de produto. "
                 f"Mande AGORA o link do '{p['name']}': {p['link']} "
                 f"Seja direto, mande o link já na primeira frase. "
-                f"Depois faça UMA pergunta para continuar a conversa."
+                f"Depois faça UMA pergunta para continuar a conversa. "
+                f"NÃO mencione, NÃO ofereça e NÃO mande link de NENHUM outro produto."
+            )
+        elif locked_product:
+            p = PRODUCTS[locked_product]
+            extra_context = (
+                f"TRAVA DE PRODUTO: O lead JÁ recebeu o link do produto '{p['name']}' "
+                f"({p['link']}) em mensagem anterior. NÃO mude de produto. "
+                f"NÃO ofereça nem mencione outro produto. NÃO mande link de outro produto. "
+                f"Continue focado em fechar ESTE produto: trate objeção, tire dúvida, "
+                f"reforce a garantia de 7 dias, ou reenvie o MESMO link se for o caso. "
+                f"Frases como 'quero essa condição', 'topei', 'me manda', 'manda aí' "
+                f"significam interesse NESTE produto — fecha aqui."
             )
 
         try:
@@ -137,6 +155,20 @@ async def _process_debounced(user_id: str):
         except Exception as claude_err:
             response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
             logger.error(f"[DEBOUNCE] Erro Claude para {user_name}: {claude_err}")
+
+        # Pós-geração: se há produto travado e o Claude vazou link de OUTRO produto, corrige
+        if locked_product:
+            detected_in_response = _detect_link_sent(response_text)
+            if detected_in_response and detected_in_response != locked_product:
+                p = PRODUCTS[locked_product]
+                response_text = (
+                    f"{user_name}, segue o link de novo, qualquer dúvida me chama: {p['link']}\n\n"
+                    f"O que tá te travando pra fechar agora? Preço, tempo ou outra coisa?"
+                )
+                logger.warning(
+                    f"[LOCK] Claude tentou trocar de produto ({locked_product} → {detected_in_response}) "
+                    f"para {user_name} ({user_id}). Resposta substituída pela versão segura."
+                )
 
         conv_manager.add_message(user_id, "assistant", response_text)
         link_sent = _detect_link_sent(response_text)
