@@ -93,6 +93,7 @@ async def _process_debounced(user_id: str):
                 "o_mapa_convencer": "mcc20",
                 "a_arte_de_precificar": "arte20",
                 "estrategias_vendas_digital": "metodo26",
+                "blindar_mente_filho": "familia26",
             }.get(product_from_keyword, product_from_keyword)
             conv_manager.mark_keyword_triggered(user_id, keyword_label, product_from_keyword)
         if triggered_product:
@@ -237,6 +238,9 @@ TAG_TO_PRODUCT = {
     "open_checkout_metodo26": "estrategias_vendas_digital",
     "metodo26": "estrategias_vendas_digital",
     "método26": "estrategias_vendas_digital",
+    "open_checkout_familia26": "blindar_mente_filho",
+    "familia26": "blindar_mente_filho",
+    "família26": "blindar_mente_filho",
 }
 
 KEYWORD_TO_PRODUCT = [
@@ -244,6 +248,9 @@ KEYWORD_TO_PRODUCT = [
     (re.compile(r"\bmcc\s*20\b", re.IGNORECASE), "o_mapa_convencer"),
     (re.compile(r"\bm[eé]todo\s*26\b", re.IGNORECASE), "estrategias_vendas_digital"),
     (re.compile(r"\bm[eé]todo\b", re.IGNORECASE), "estrategias_vendas_digital"),
+    # Família 26 — captura variações comuns de digitação (familia26, família 26, famila26, etc.)
+    (re.compile(r"\bfam[ií]?l[ií]?a\s*26\b", re.IGNORECASE), "blindar_mente_filho"),
+    (re.compile(r"\bfam[ií]?l[ií]?a\b", re.IGNORECASE), "blindar_mente_filho"),
 ]
 
 
@@ -255,7 +262,7 @@ def _detect_keyword_product(text: str) -> Optional[str]:
 
 
 def _detect_tag_product(tag: str) -> Optional[str]:
-    """Tag exata OU qualquer tag contendo 'metodo26'/'método26' → produto Método 26."""
+    """Tag exata OU qualquer tag contendo 'metodo26'/'familia26' → produto correspondente."""
     if not tag:
         return None
     exact = TAG_TO_PRODUCT.get(tag)
@@ -263,6 +270,8 @@ def _detect_tag_product(tag: str) -> Optional[str]:
         return exact
     if "metodo26" in tag or "método26" in tag:
         return "estrategias_vendas_digital"
+    if "familia26" in tag or "família26" in tag:
+        return "blindar_mente_filho"
     return None
 
 
@@ -524,6 +533,7 @@ PRODUCT_SLUG = {
     "mcc20": "o_mapa_convencer",
     "arte20": "a_arte_de_precificar",
     "metodo26": "estrategias_vendas_digital",
+    "familia26": "blindar_mente_filho",
 }
 
 
@@ -1096,6 +1106,7 @@ def _detect_link_sent(text: str) -> Optional[str]:
         "o_mapa_convencer": "payfast.greenn.com.br/66110",
         "a_arte_de_precificar": "payfast.greenn.com.br/65471",
         "estrategias_vendas_digital": "pages.eduprado.com.br/estrategias-de-vendas-no-digital",
+        "blindar_mente_filho": "payfast.greenn.com.br/xg846k8",
     }
     for product_id, fragment in links.items():
         if fragment in text:

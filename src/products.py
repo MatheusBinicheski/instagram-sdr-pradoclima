@@ -55,6 +55,36 @@ PRODUCTS = {
             "negócio", "empresa", "empresário", "empreendedor", "pequena empresa",
         ],
     },
+    "blindar_mente_filho": {
+        "name": "10 Passos para Blindar a Mente do Seu Filho",
+        "description": (
+            "Material do Eduardo Prado para pai e mãe que querem proteger a mente dos filhos "
+            "do excesso de tela, ansiedade, comparação nas redes e conteúdo nocivo. "
+            "10 passos práticos para fortalecer caráter, identidade e equilíbrio emocional da criança "
+            "em meio ao mundo digital. Para família que quer criar filho forte de verdade, não bolha."
+        ),
+        "beneficios": [
+            "10 passos práticos para blindar a mente do seu filho",
+            "Como lidar com excesso de telas, ansiedade e comparação social",
+            "Fortalecer identidade e caráter da criança desde cedo",
+            "Conversas reais entre pai/mãe e filho — sem terceirizar a educação",
+            "Aplicável no dia a dia, sem teoria sem fim",
+        ],
+        "link": "https://payfast.greenn.com.br/xg846k8",
+        "tipo": "material_digital",
+        "preco": "Consultar na página",
+        "garantia": "7 dias",
+        "palavras_chave": [
+            "familia26", "família26", "familia 26", "família 26",
+            "familia", "família", "filho", "filha", "filhos", "criança", "crianças",
+            "filhinho", "filhinha", "filhote", "menino", "menina", "adolescente",
+            "pai", "mãe", "mae", "paterno", "materno", "parental", "parentalidade",
+            "blindar", "blindagem", "proteger filho", "educação dos filhos",
+            "tela", "telas", "celular do filho", "tiktok", "rede social filho",
+            "ansiedade", "comparação", "bullying", "escola", "caráter",
+            "criar filho", "educar filho", "mente do filho", "saúde mental",
+        ],
+    },
     "estrategias_vendas_digital": {
         "name": "Aulão Estratégias de Vendas e Posicionamento no Digital (Método 26)",
         "description": (
@@ -105,4 +135,8 @@ PRODUCT_LIST_TEXT = """
 3️⃣ *Aulão Estratégias de Vendas e Posicionamento no Digital (Método 26)*
    Os 6 passos para vender de verdade no digital — R$ 197 (12x R$ 20,25)
    👉 https://pages.eduprado.com.br/estrategias-de-vendas-no-digital/
+
+4️⃣ *10 Passos para Blindar a Mente do Seu Filho*
+   Para pai e mãe que querem proteger a mente do filho do excesso de tela e ansiedade
+   👉 https://payfast.greenn.com.br/xg846k8
 """

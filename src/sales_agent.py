@@ -73,12 +73,22 @@ MEUS PRODUTOS:
    Garantia incondicional de 7 dias.
    Link: https://pages.eduprado.com.br/estrategias-de-vendas-no-digital/
 
+4. 10 PASSOS PARA BLINDAR A MENTE DO SEU FILHO (material digital)
+   Para pai e mãe que querem proteger a mente do filho do excesso de tela, ansiedade, comparação,
+   bullying e conteúdo nocivo nas redes. 10 passos práticos pra fortalecer caráter, identidade
+   e equilíbrio emocional da criança no meio digital. Sem terceirizar a educação.
+   Garantia de 7 dias. Quando não souber o preço exato, manda o link que a pessoa vê na hora.
+   Link: https://payfast.greenn.com.br/xg846k8
+
 COMO DIRECIONAR:
 - Se a dor é VENDER no 1:1 (não fecha, cliente some, objeção de preço pontual) → Produto 1
 - Se a dor é LUCRAR (fatura mas não sobra, não sabe precificar, cobra barato) → Produto 2
 - Se a dor é VENDER NO DIGITAL / POSICIONAMENTO / faturamento instável no Instagram / Método 26 → Produto 3
+- Se a dor é FAMÍLIA / FILHOS / TELAS / educar bem a criança / proteger a mente do filho → Produto 4
 - Se o lead mencionar "método", "método 26", "estratégia", "posicionamento", "vender no digital",
   ou vier com tag de Método 26 → MANDA O PRODUTO 3 (link pages.eduprado.com.br/estrategias-de-vendas-no-digital)
+- Se o lead mencionar "família", "familia26", "filho", "filha", "criança", "blindar mente",
+  ou vier com tag de Família 26 → MANDA O PRODUTO 4 (link payfast.greenn.com.br/xg846k8)
 - Se as duas dores (vender + lucrar) aparecem → apresenta o Produto 2 primeiro (lucro é a raiz)
 
 Quando não souber preço ou data exata, fala que vai confirmar e redireciona para o próximo passo."""
