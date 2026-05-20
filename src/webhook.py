@@ -630,6 +630,31 @@ def remarketing_manual_send(payload: ManualRemarketingPayload):
     return results
 
 
+# Regex por product_id, agrupando os patterns de KEYWORD_TO_PRODUCT
+PRODUCT_REGEXES: dict[str, list] = {}
+for _pattern, _pid in KEYWORD_TO_PRODUCT:
+    PRODUCT_REGEXES.setdefault(_pid, []).append(_pattern)
+
+
+def _historico_menciona_produto(history: list, product_id: str) -> Optional[str]:
+    """
+    Verifica se o histórico do lead (mensagens do usuário) menciona alguma
+    palavra-chave do produto. Retorna o trecho que casou ou None.
+    """
+    patterns = PRODUCT_REGEXES.get(product_id, [])
+    if not patterns:
+        return None
+    for msg in history:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", "") or ""
+        for p in patterns:
+            m = p.search(content)
+            if m:
+                return content[:120]
+    return None
+
+
 def _get_remarketing_leads(slug: str) -> tuple[dict, list]:
     """Retorna (product, leads) para o slug. 'broadcast' = todos os contatos exceto bloqueados."""
     if slug == "broadcast":
@@ -721,6 +746,114 @@ def remarketing_send(slug: str):
         except Exception as e:
             logger.error(f"[REMARKETING {slug.upper()}] Erro para {user_name}: {e}")
             results["failed"] += 1
+
+    return results
+
+
+# ─── Remarketing por histórico — varre todas conversas, não só keywords_triggered ─
+
+@app.get("/remarketing/{slug}/preview-historico")
+def remarketing_preview_historico(slug: str):
+    """
+    Lista todos que JÁ MENCIONARAM o termo do produto no histórico, mesmo que
+    nunca tenham sido marcados em keywords_triggered (útil para leads anteriores
+    ao deploy da palavra-chave). slug: mcc20 | arte20 | metodo26 | familia26
+    """
+    slug = slug.lower()
+    if slug not in PRODUCT_SLUG:
+        raise HTTPException(status_code=404, detail=f"Use: {list(PRODUCT_SLUG.keys())}")
+    if not conv_manager:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    product_id = PRODUCT_SLUG[slug]
+    product = PRODUCTS[product_id]
+
+    leads = []
+    for conv in conv_manager.conversations.values():
+        if conv.get("status") == "vendido":
+            continue
+        match = _historico_menciona_produto(conv.get("history", []), product_id)
+        if match:
+            leads.append({
+                "user_id": conv["user_id"],
+                "user_name": conv.get("user_name"),
+                "stage": conv.get("stage"),
+                "status": conv.get("status"),
+                "product_recommended": conv.get("product_recommended"),
+                "link_sent": conv.get("link_sent", False),
+                "trecho_que_casou": match,
+            })
+
+    return {
+        "produto": product["name"],
+        "link": product["link"],
+        "slug": slug,
+        "total": len(leads),
+        "leads": leads,
+    }
+
+
+@app.post("/remarketing/{slug}/send-historico")
+def remarketing_send_historico(slug: str):
+    """
+    Envia remarketing com o link correto do produto para todos que mencionaram o
+    termo no histórico (mesmo que keywords_triggered não esteja marcado).
+    Marca retroativamente keywords_triggered e product_recommended.
+    slug: mcc20 | arte20 | metodo26 | familia26
+    """
+    if not agent or not reactivation_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+
+    slug = slug.lower()
+    if slug not in PRODUCT_SLUG:
+        raise HTTPException(status_code=404, detail=f"Use: {list(PRODUCT_SLUG.keys())}")
+
+    product_id = PRODUCT_SLUG[slug]
+    product = PRODUCTS[product_id]
+
+    leads = []
+    for conv in conv_manager.conversations.values():
+        if conv.get("status") == "vendido":
+            continue
+        match = _historico_menciona_produto(conv.get("history", []), product_id)
+        if match:
+            leads.append(conv)
+
+    results = {
+        "produto": product["name"],
+        "link_base": product["link"],
+        "slug": slug,
+        "total_encontrados": len(leads),
+        "sent": 0,
+        "failed": 0,
+        "leads": [],
+    }
+
+    for lead in leads:
+        user_id = lead["user_id"]
+        user_name = (lead.get("user_name") or "amigo").strip() or "amigo"
+        tracked_link = f"{product['link'].split('?')[0]}?ref={user_id}"
+
+        try:
+            message = agent.generate_remarketing_message(
+                user_name=user_name,
+                product_name=product["name"],
+                product_link=tracked_link,
+            )
+            if reactivation_svc._send_manychat_dm(user_id, message):
+                conv_manager.add_message(user_id, "assistant", message)
+                conv_manager.mark_keyword_triggered(user_id, slug, product_id)
+                conv_manager.mark_link_sent(user_id, product_id)
+                results["sent"] += 1
+                results["leads"].append({"user_id": user_id, "user_name": user_name, "status": "enviado"})
+                logger.info(f"[REMARKETING HIST {slug.upper()}] → {user_name} ({user_id})")
+            else:
+                results["failed"] += 1
+                results["leads"].append({"user_id": user_id, "user_name": user_name, "status": "falha_envio"})
+        except Exception as e:
+            logger.error(f"[REMARKETING HIST {slug.upper()}] Erro {user_name}: {e}")
+            results["failed"] += 1
+            results["leads"].append({"user_id": user_id, "user_name": user_name, "status": f"erro: {e}"})
 
     return results
 
