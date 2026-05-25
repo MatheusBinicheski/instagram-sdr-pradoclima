@@ -475,6 +475,81 @@ class SalesAgent:
         )
         return response.content[0].text.strip()
 
+    def generate_meeting_reminder_1h(
+        self,
+        user_name: str,
+        meeting_hour: str,
+        meet_link: str,
+    ) -> str:
+        """1h antes da reunião — persuasivo, sem ser robótico, com link."""
+        link_line = f"Link: {meet_link}" if meet_link else "Link: (segue na agenda do Guilherme)"
+        prompt = (
+            f"Lead: {user_name}\n"
+            f"Hora da reunião com o Guilherme (closer de seguro de vida): {meeting_hour}\n"
+            f"{link_line}\n\n"
+            "Escreva uma mensagem CURTA (máx 2 frases) lembrando que falta 1 hora pra reunião. "
+            "Tom: cordial, firme, gera presença. Sem motivação vazia. Sem 'tudo bem?'. "
+            "Inclua o link e o horário. Brasileiro, WhatsApp, informal mas profissional. "
+            "Não use a palavra 'pressão'. Não diga 'última chance'."
+        )
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=120,
+            system="Você escreve lembretes de reunião curtos, humanos e persuasivos. NUNCA usa emojis em excesso (no máx 1). NUNCA usa o nome do lead mais de uma vez na mensagem.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+
+    def generate_meeting_pressure(
+        self,
+        user_name: str,
+        meeting_hour: str,
+        meet_link: str,
+        attempt: int = 1,
+    ) -> str:
+        """
+        Lead não confirmou a reunião no dia. Pressão persuasiva, até 3 mensagens.
+        Cada attempt tem ângulo diferente — não repetir o mesmo argumento.
+        """
+        link_line = f"Link: {meet_link}" if meet_link else f"Agenda: ver com o Guilherme"
+
+        angles = {
+            1: (
+                "ESCASSEZ — sua vaga vai pra fila de espera. Pessoas estão aguardando esse horário "
+                "pra blindar a família e a empresa. Pergunta se ele vai estar. Tom firme, sem ofensa."
+            ),
+            2: (
+                "CONSEQUÊNCIA — lembre que o Guilherme bloqueou 30 min dele só pra esse lead "
+                "(MDRT, top 1% mundial). Se não confirmar até o fim do dia, libera a vaga pra próximo. "
+                "Pergunta direta: 'me dá um ok aqui'."
+            ),
+            3: (
+                "ÚLTIMA CHAMADA — sem dramatizar. Encerramento educado: 'se não confirmar até X horas "
+                "(antes da reunião), libero a vaga pra próximo da fila'. Deixa a porta aberta pra "
+                "reagendar no futuro, mas a vaga de hoje vai embora. Curto, 2 frases, firme."
+            ),
+        }
+        angle = angles.get(attempt, angles[1])
+
+        prompt = (
+            f"Lead: {user_name}\n"
+            f"Horário da reunião com o Guilherme HOJE: {meeting_hour}\n"
+            f"{link_line}\n"
+            f"Tentativa de cobrança #{attempt} de 3.\n\n"
+            f"Ângulo desta mensagem: {angle}\n\n"
+            "Escreva 2-3 frases no MÁXIMO. Brasileiro, WhatsApp, informal mas firme. "
+            "Sem emoji repetido (máx 1). Sem 'tudo bem?'. Sem clichê motivacional. "
+            "Sempre inclua o link/agenda. Use o nome do lead UMA vez no máximo. "
+            "Mensagem PERSUASIVA — quem está do outro lado precisa sentir que a vaga é finita."
+        )
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=180,
+            system="Você é SDR de seguro de vida. Escreve lembretes de reunião com escassez real, sem ser agressivo. Tom: firme, profissional, brasileiro de WhatsApp.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+
     def should_send_proactive_dm(self, follower_bio: str, follower_name: str) -> tuple[bool, str]:
         """Decide se deve enviar DM proativa para um seguidor baseado no perfil."""
         prompt = (

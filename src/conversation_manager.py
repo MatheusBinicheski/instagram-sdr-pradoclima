@@ -221,8 +221,57 @@ class ConversationManager:
             self.conversations[user_id]["meeting_scheduled"] = True
             self.conversations[user_id]["meeting_meet_link"] = meet_link
             self.conversations[user_id]["meeting_time"] = event_time
+            self.conversations[user_id]["meeting_status"] = "scheduled"
+            self.conversations[user_id]["meeting_confirmed"] = False
+            self.conversations[user_id]["meeting_reminders"] = {
+                "2d_sent_at": None,
+                "morning_sent_at": None,
+                "1h_sent_at": None,
+                "pressure_count": 0,
+                "last_pressure_at": None,
+            }
             self.conversations[user_id]["stage"] = "reuniao_agendada"
             self._save()
+
+    def mark_meeting_confirmed(self, user_id: str) -> bool:
+        if user_id not in self.conversations:
+            return False
+        self.conversations[user_id]["meeting_confirmed"] = True
+        self.conversations[user_id]["meeting_confirmed_at"] = datetime.now().isoformat()
+        self._save()
+        return True
+
+    def mark_meeting_cancelled(self, user_id: str) -> bool:
+        if user_id not in self.conversations:
+            return False
+        self.conversations[user_id]["meeting_status"] = "cancelled"
+        self.conversations[user_id]["meeting_cancelled_at"] = datetime.now().isoformat()
+        self._save()
+        return True
+
+    def mark_meeting_completed(self, user_id: str) -> bool:
+        if user_id not in self.conversations:
+            return False
+        self.conversations[user_id]["meeting_status"] = "completed"
+        self.conversations[user_id]["meeting_completed_at"] = datetime.now().isoformat()
+        self._save()
+        return True
+
+    def mark_meeting_reminder_sent(self, user_id: str, slot: str):
+        """slot ∈ {'2d_sent_at','morning_sent_at','1h_sent_at'}"""
+        if user_id not in self.conversations:
+            return
+        reminders = self.conversations[user_id].setdefault("meeting_reminders", {})
+        reminders[slot] = datetime.now().isoformat()
+        self._save()
+
+    def mark_meeting_pressure_sent(self, user_id: str):
+        if user_id not in self.conversations:
+            return
+        reminders = self.conversations[user_id].setdefault("meeting_reminders", {})
+        reminders["pressure_count"] = reminders.get("pressure_count", 0) + 1
+        reminders["last_pressure_at"] = datetime.now().isoformat()
+        self._save()
 
     def get_hub_prospects_contacted(self) -> set:
         return {uid for uid, c in self.conversations.items() if c.get("is_hub_prospect")}

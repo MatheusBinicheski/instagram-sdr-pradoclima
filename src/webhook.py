@@ -15,6 +15,7 @@ from .sales_agent import STAGE_FALLBACKS
 from .sales_agent import SalesAgent
 from .conversation_manager import ConversationManager
 from .reactivation import ReactivationService
+from .meeting_reminders import MeetingReminderService
 from .config import Config
 from .products import PRODUCTS
 
@@ -25,6 +26,7 @@ app = FastAPI(title="Instagram SDR Bot — Eduardo Prado (@pradoclima)", version
 agent: SalesAgent = None
 conv_manager: ConversationManager = None
 reactivation_svc: ReactivationService = None
+meeting_svc: MeetingReminderService = None
 
 # Debounce: acumula mensagens rápidas e processa como bloco único
 DEBOUNCE_DELAY = 4  # segundos de silêncio antes de processar
@@ -51,9 +53,16 @@ async def startup():
             instagram_token=Config.INSTAGRAM_ACCESS_TOKEN,
             instagram_account_id=Config.INSTAGRAM_ACCOUNT_ID,
         )
+        global meeting_svc
+        meeting_svc = MeetingReminderService(
+            agent=agent,
+            conv_manager=conv_manager,
+            reactivation_svc=reactivation_svc,
+        )
         asyncio.create_task(_reactivation_loop())
         asyncio.create_task(_purchase_followup_loop())
-        logger.info("Schedulers de reativação e follow-up de compra iniciados.")
+        asyncio.create_task(_meeting_reminders_loop())
+        logger.info("Schedulers de reativação, follow-up de compra e lembretes de reunião iniciados.")
 
 
 async def _process_debounced(user_id: str):
@@ -83,6 +92,15 @@ async def _process_debounced(user_id: str):
         conv = conv_manager.get_or_create(user_id, user_name)
         history = conv_manager.get_history(user_id)
         conv_manager.add_message(user_id, "user", history_message)
+
+        # Se a pessoa já tem reunião agendada e respondeu confirmando/cancelando, registra.
+        if meeting_svc:
+            try:
+                meeting_verdict = meeting_svc.handle_user_reply(user_id, combined_message or history_message)
+                if meeting_verdict:
+                    logger.info(f"[MEETING] {user_name} ({user_id}) → {meeting_verdict}")
+            except Exception as mv_err:
+                logger.warning(f"[MEETING] Falha ao avaliar confirmação: {mv_err}")
 
         # Stage + keyword detection
         triggered_product = last["triggered_product"]
@@ -229,6 +247,19 @@ async def _reactivation_loop():
                 logger.info(f"[REATIVAÇÃO AUTO] {result}")
             except Exception as e:
                 logger.error(f"[REATIVAÇÃO AUTO] Erro: {e}")
+
+
+async def _meeting_reminders_loop():
+    """Roda a cada 5 minutos e dispara lembretes de reunião (2d / manhã / 1h / pressão)."""
+    while True:
+        await asyncio.sleep(300)
+        if meeting_svc:
+            try:
+                result = meeting_svc.run_tick()
+                if any(v > 0 for v in result.values()):
+                    logger.info(f"[MEETING REMINDERS] {result}")
+            except Exception as e:
+                logger.error(f"[MEETING REMINDERS] Erro: {e}", exc_info=True)
 
 
 async def _purchase_followup_loop():
@@ -398,6 +429,79 @@ async def manychat_comment_webhook(payload: ManyChatPayload):
             "quick_replies": [],
         }
     })
+
+
+# ─── Reuniões com o Guilherme ───────────────────────────────────────────────
+
+class MeetingSchedulePayload(BaseModel):
+    subscriber_id: str
+    meeting_time: str  # ISO 8601, com ou sem timezone (assume BRT se sem)
+    meet_link: Optional[str] = ""
+
+
+@app.post("/meeting/schedule")
+def meeting_schedule(payload: MeetingSchedulePayload):
+    """Registra uma reunião marcada pelo lead na agenda do Guilherme.
+
+    Use este endpoint via Zapier/n8n/manual quando souber que o lead
+    agendou (ex.: webhook do Google Calendar)."""
+    if not meeting_svc or not conv_manager:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    if payload.subscriber_id not in conv_manager.conversations:
+        # cria conversa vazia para permitir agendar mesmo sem histórico prévio
+        conv_manager.get_or_create(payload.subscriber_id, payload.subscriber_id)
+    ok = meeting_svc.schedule(payload.subscriber_id, payload.meeting_time, payload.meet_link or "")
+    if not ok:
+        raise HTTPException(status_code=400, detail="meeting_time inválido (use ISO 8601).")
+    return {"message": "reunião registrada", "subscriber_id": payload.subscriber_id}
+
+
+@app.post("/meeting/{subscriber_id}/confirm")
+def meeting_confirm(subscriber_id: str):
+    if not meeting_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    ok = meeting_svc.mark_confirmed(subscriber_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    return {"message": "reunião confirmada", "subscriber_id": subscriber_id}
+
+
+@app.post("/meeting/{subscriber_id}/cancel")
+def meeting_cancel(subscriber_id: str):
+    if not meeting_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    ok = meeting_svc.mark_cancelled(subscriber_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+    return {"message": "reunião cancelada", "subscriber_id": subscriber_id}
+
+
+@app.post("/meeting/tick")
+def meeting_tick():
+    """Roda manualmente uma rodada do scheduler de lembretes (debug/cron externo)."""
+    if not meeting_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    return meeting_svc.run_tick()
+
+
+@app.get("/meeting/upcoming")
+def meeting_upcoming():
+    if not conv_manager:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    upcoming = []
+    for c in conv_manager.conversations.values():
+        if c.get("meeting_scheduled") and c.get("meeting_status") not in ("cancelled", "completed", "no_show"):
+            upcoming.append({
+                "user_id": c.get("user_id"),
+                "user_name": c.get("user_name"),
+                "meeting_time": c.get("meeting_time"),
+                "meeting_meet_link": c.get("meeting_meet_link"),
+                "meeting_confirmed": c.get("meeting_confirmed", False),
+                "meeting_status": c.get("meeting_status", "scheduled"),
+                "reminders": c.get("meeting_reminders", {}),
+            })
+    upcoming.sort(key=lambda x: x.get("meeting_time") or "")
+    return {"total": len(upcoming), "meetings": upcoming}
 
 
 # ─── Reativação ─────────────────────────────────────────────────────────────
