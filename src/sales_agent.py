@@ -88,8 +88,9 @@ COMO DIRECIONAR:
 - Se a dor é FAMÍLIA / FILHOS / TELAS / educar bem a criança / proteger a mente do filho → Produto 4
 - Se a dor é SEGURO DE VIDA / proteger renda / invalidez / doença grave / sucessão / inventário /
   patrimônio / blindagem / "se eu morrer" / "se eu não puder trabalhar" / "quem cuida da família"
-  → ATIVE O MODO SEGURO DE VIDA (próxima seção) — você deixa de ser Eduardo Prado e passa a ser
-    o SDR do Guilherme Rodrigues. Objetivo: marcar reunião na agenda do Guilherme.
+  → ATIVE O MODO SEGURO DE VIDA (próxima seção). Você continua sendo o Prado, mas o assunto
+    passa pra sua assessoria de seguros. Objetivo: AGENDAR uma reunião com seu time.
+    NUNCA cite nome próprio do especialista — use "minha assessoria" / "meu time".
 - Se o lead mencionar "método", "método 26", "estratégia", "posicionamento", "vender no digital",
   ou vier com tag de Método 26 → MANDA O PRODUTO 3 (link pages.eduprado.com.br/estrategias-de-vendas-no-digital)
 - Se o lead mencionar "família", "familia26", "filho", "filha", "criança", "blindar mente",
@@ -103,8 +104,8 @@ SÓ mude de produto se o lead pedir EXPLICITAMENTE outro tema (ex: "tenho proble
 quando o link enviado era do Mapa para Convencer).
 Frases tipo "quero essa condição", "topei", "manda aí" são interesse no produto JÁ enviado — fecha
 NESSE produto, não ofereça outro.
-A regra vale TAMBÉM para o seguro de vida: depois de enviar a agenda do Guilherme, fique nesse
-caminho — confirme se a pessoa escolheu um horário, não volte a oferecer cursos.
+A regra vale TAMBÉM para o seguro de vida: depois de oferecer/agendar a reunião com sua assessoria,
+fique nesse caminho — confirme se a pessoa escolheu um horário, não volte a oferecer cursos.
 
 Quando não souber preço ou data exata, fala que vai confirmar e redireciona para o próximo passo.
 
@@ -482,15 +483,16 @@ class SalesAgent:
         meet_link: str,
     ) -> str:
         """1h antes da reunião — persuasivo, sem ser robótico, com link."""
-        link_line = f"Link: {meet_link}" if meet_link else "Link: (segue na agenda do Guilherme)"
+        link_line = f"Link: {meet_link}" if meet_link else "Link: (segue na agenda da minha assessoria)"
         prompt = (
             f"Lead: {user_name}\n"
-            f"Hora da reunião com o Guilherme (closer de seguro de vida): {meeting_hour}\n"
+            f"Hora da reunião com a assessoria de seguros do Prado: {meeting_hour}\n"
             f"{link_line}\n\n"
             "Escreva uma mensagem CURTA (máx 2 frases) lembrando que falta 1 hora pra reunião. "
             "Tom: cordial, firme, gera presença. Sem motivação vazia. Sem 'tudo bem?'. "
             "Inclua o link e o horário. Brasileiro, WhatsApp, informal mas profissional. "
-            "Não use a palavra 'pressão'. Não diga 'última chance'."
+            "Não use a palavra 'pressão'. Não diga 'última chance'. "
+            "NUNCA cite nome próprio de especialista — use 'minha equipe' / 'meu time'."
         )
         response = self.client.messages.create(
             model=self.model,
@@ -511,7 +513,7 @@ class SalesAgent:
         Lead não confirmou a reunião no dia. Pressão persuasiva, até 3 mensagens.
         Cada attempt tem ângulo diferente — não repetir o mesmo argumento.
         """
-        link_line = f"Link: {meet_link}" if meet_link else f"Agenda: ver com o Guilherme"
+        link_line = f"Link: {meet_link}" if meet_link else f"Agenda: ver com minha equipe"
 
         angles = {
             1: (
@@ -519,8 +521,9 @@ class SalesAgent:
                 "pra blindar a família e a empresa. Pergunta se ele vai estar. Tom firme, sem ofensa."
             ),
             2: (
-                "CONSEQUÊNCIA — lembre que o Guilherme bloqueou 30 min dele só pra esse lead "
-                "(MDRT, top 1% mundial). Se não confirmar até o fim do dia, libera a vaga pra próximo. "
+                "CONSEQUÊNCIA — lembre que sua assessoria (top 1% mundial em planejamento de seguros, "
+                "+R$ 1,2 bi em patrimônio blindado) bloqueou 30 min só pra esse lead. "
+                "Se não confirmar até o fim do dia, libera a vaga pra próximo. "
                 "Pergunta direta: 'me dá um ok aqui'."
             ),
             3: (
@@ -533,13 +536,14 @@ class SalesAgent:
 
         prompt = (
             f"Lead: {user_name}\n"
-            f"Horário da reunião com o Guilherme HOJE: {meeting_hour}\n"
+            f"Horário da reunião com a assessoria de seguros HOJE: {meeting_hour}\n"
             f"{link_line}\n"
             f"Tentativa de cobrança #{attempt} de 3.\n\n"
             f"Ângulo desta mensagem: {angle}\n\n"
             "Escreva 2-3 frases no MÁXIMO. Brasileiro, WhatsApp, informal mas firme. "
             "Sem emoji repetido (máx 1). Sem 'tudo bem?'. Sem clichê motivacional. "
             "Sempre inclua o link/agenda. Use o nome do lead UMA vez no máximo. "
+            "NUNCA cite nome próprio de especialista — use 'minha equipe' / 'minha assessoria'. "
             "Mensagem PERSUASIVA — quem está do outro lado precisa sentir que a vaga é finita."
         )
         response = self.client.messages.create(

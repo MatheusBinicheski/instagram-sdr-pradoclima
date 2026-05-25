@@ -16,8 +16,10 @@ from .sales_agent import SalesAgent
 from .conversation_manager import ConversationManager
 from .reactivation import ReactivationService
 from .meeting_reminders import MeetingReminderService
+from .agenda_slots import AgendaSlots
 from .config import Config
 from .products import PRODUCTS
+from .seguros_vida_kb import SEGURO_VIDA_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ agent: SalesAgent = None
 conv_manager: ConversationManager = None
 reactivation_svc: ReactivationService = None
 meeting_svc: MeetingReminderService = None
+agenda: AgendaSlots = None
 
 # Debounce: acumula mensagens rápidas e processa como bloco único
 DEBOUNCE_DELAY = 4  # segundos de silêncio antes de processar
@@ -36,7 +39,7 @@ _message_buffers: dict[str, list[dict]] = {}  # user_id → lista de payloads
 
 @app.on_event("startup")
 async def startup():
-    global agent, conv_manager, reactivation_svc
+    global agent, conv_manager, reactivation_svc, agenda
     if not Config.ANTHROPIC_API_KEY:
         logger.error("ANTHROPIC_API_KEY não configurada! Adicione em Railway → Variables.")
     else:
@@ -44,6 +47,8 @@ async def startup():
         logger.info("Sales Agent (Eduardo Prado) inicializado.")
     conv_manager = ConversationManager()
     logger.info("ConversationManager inicializado.")
+    agenda = AgendaSlots()
+    logger.info(f"AgendaSlots inicializada — {len([s for s in agenda.slots if s['status'] == 'available'])} slots disponíveis.")
 
     if agent and conv_manager:
         reactivation_svc = ReactivationService(
@@ -133,6 +138,13 @@ async def _process_debounced(user_id: str):
         conv_manager.update_stage(user_id, current_stage)
 
         extra_context = ""
+
+        # Detecta se conversa é sobre seguro de vida → injeta agenda
+        seguros_now = _is_seguros_context(combined_message, history, conv)
+        if seguros_now and agenda:
+            agenda_block = agenda.format_for_prompt(days_ahead=10, limit=30)
+            extra_context += agenda_block + "\n\n"
+
         if triggered_product:
             p = PRODUCTS[triggered_product]
             extra_context = (
@@ -195,6 +207,9 @@ async def _process_debounced(user_id: str):
 
         # Envia via API (não via webhook response — o webhook já retornou vazio)
         safe = re.sub(r"\{\{[^}]*\}\}", "", response_text).strip()
+        safe = _sanitize_persona(safe, user_id, user_name)
+        # Detecta marcador [BOOK: ISO] gerado pelo Claude e faz a reserva real
+        safe = _process_booking_marker(safe, user_id, user_name)
         if user_id:
             safe = _inject_tracking(safe, user_id)
 
@@ -431,7 +446,54 @@ async def manychat_comment_webhook(payload: ManyChatPayload):
     })
 
 
-# ─── Reuniões com o Guilherme ───────────────────────────────────────────────
+# ─── Agenda de slots ────────────────────────────────────────────────────────
+
+class AgendaSlotsAddPayload(BaseModel):
+    slots: list[str]  # lista de ISO 8601 (com ou sem tz; assume BRT se sem)
+
+
+@app.post("/agenda/slots")
+def agenda_add_slots(payload: AgendaSlotsAddPayload):
+    if not agenda:
+        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
+    added = agenda.add_slots(payload.slots)
+    return {"added": added, "total": len(agenda.slots)}
+
+
+@app.delete("/agenda/slots")
+def agenda_remove_slot(iso: str):
+    if not agenda:
+        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
+    ok = agenda.remove_slot(iso)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Slot não encontrado.")
+    return {"removed": iso}
+
+
+@app.get("/agenda/available")
+def agenda_list_available(days: int = 14, period: Optional[str] = None):
+    if not agenda:
+        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
+    slots = agenda.list_available(days_ahead=days, period=period)
+    return {
+        "total": len(slots),
+        "slots": [
+            {"iso": s["iso"], "status": s["status"], "reserved_by": s["reserved_by"]}
+            for s in slots
+        ],
+    }
+
+
+@app.post("/agenda/regenerate-default")
+def agenda_regenerate_default(days: int = 14):
+    """Popula a grade default seg-sex 9h-17h pelos próximos N dias (idempotente)."""
+    if not agenda:
+        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
+    added = agenda.ensure_default_grid(days_ahead=days)
+    return {"added": added, "total_slots": len(agenda.slots)}
+
+
+# ─── Reuniões com a assessoria ──────────────────────────────────────────────
 
 class MeetingSchedulePayload(BaseModel):
     subscriber_id: str
@@ -441,7 +503,7 @@ class MeetingSchedulePayload(BaseModel):
 
 @app.post("/meeting/schedule")
 def meeting_schedule(payload: MeetingSchedulePayload):
-    """Registra uma reunião marcada pelo lead na agenda do Guilherme.
+    """Registra uma reunião marcada pelo lead na agenda da assessoria.
 
     Use este endpoint via Zapier/n8n/manual quando souber que o lead
     agendou (ex.: webhook do Google Calendar)."""
@@ -1350,6 +1412,89 @@ def reset_conversation(subscriber_id: str):
         conv_manager._save()
         return {"message": f"Conversa {subscriber_id} resetada."}
     raise HTTPException(status_code=404, detail="Conversa não encontrada")
+
+
+_SEGURO_KEYS_LOWER = {k.lower() for k in SEGURO_VIDA_KEYWORDS}
+
+
+def _is_seguros_context(message: str, history: list[dict], conv: dict) -> bool:
+    """Decide se a conversa atual é sobre seguro de vida, pra injetar a agenda
+    no contexto do Claude. Heurística simples: palavra-chave na mensagem
+    atual OU já houve reunião agendada OU já houve menção em histórico recente."""
+    msg = (message or "").lower()
+    if any(k in msg for k in _SEGURO_KEYS_LOWER):
+        return True
+    if conv.get("meeting_scheduled") or conv.get("product_recommended") == "seguro_vida":
+        return True
+    for turn in history[-6:]:
+        if any(k in turn.get("content", "").lower() for k in _SEGURO_KEYS_LOWER):
+            return True
+    return False
+
+
+# Marcador de reserva — Claude inclui [BOOK: ISO_8601] quando o lead confirma slot
+_BOOK_MARKER_RE = re.compile(r"^[ \t]*\[BOOK:\s*([^\]]+)\][ \t]*\n?", re.IGNORECASE | re.MULTILINE)
+
+
+def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
+    """Detecta '[BOOK: ISO]' na resposta do Claude e dispara a reserva real.
+    Remove a linha do marcador antes de enviar pro lead."""
+    m = _BOOK_MARKER_RE.search(text)
+    if not m:
+        return text
+    iso = m.group(1).strip()
+    cleaned = _BOOK_MARKER_RE.sub("", text).strip()
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+    if not agenda or not meeting_svc:
+        logger.warning(f"[BOOK] Marcador encontrado mas agenda/meeting_svc não estão prontos.")
+        return cleaned
+
+    slot = agenda.reserve(iso, user_id)
+    if not slot:
+        logger.warning(f"[BOOK] Slot {iso} indisponível ou inválido — ignorando reserva para {user_name} ({user_id}).")
+        return cleaned + (
+            "\n\n(Acabei de ver aqui e esse horário foi pego agora. "
+            "Me dá um instante que eu confiro outras opções da semana.)"
+        )
+
+    meeting_svc.schedule(user_id, slot["iso"], meet_link="")
+    # Marca o produto pra travar fluxo e contar pra remarketing
+    conv_manager.mark_link_sent(user_id, "seguro_vida")
+    logger.info(f"[BOOK] Reservado {slot['iso']} para {user_name} ({user_id})")
+    return cleaned
+
+
+# Regras de sanitização de persona: o lead JAMAIS pode ver o nome real do
+# especialista de seguros que faz a reunião. Se o Claude escapar das
+# instruções, esta sanitização é a última linha de defesa.
+_PERSONA_SUBSTITUTIONS = [
+    (re.compile(r"\bGuilherme\s+Rodrigues\b", re.IGNORECASE), "minha assessoria"),
+    (re.compile(r"\bo\s+Guilherme\b", re.IGNORECASE),         "minha assessoria"),
+    (re.compile(r"\bGuilherme\b",            re.IGNORECASE),  "minha equipe"),
+    (re.compile(r"\bMDRT\b",                 re.IGNORECASE),  "top 1% mundial em seguros"),
+    (re.compile(r"\bAMAN\b"),                                  ""),
+    (re.compile(r"\bex[- ]oficial( do Ex[ée]rcito)?\b", re.IGNORECASE), ""),
+]
+
+
+def _sanitize_persona(text: str, user_id: str = "", user_name: str = "") -> str:
+    """Última linha de defesa: troca qualquer menção ao nome real do
+    especialista de seguros por linguagem genérica antes de enviar ao lead."""
+    cleaned = text
+    leaked: list[str] = []
+    for pattern, replacement in _PERSONA_SUBSTITUTIONS:
+        if pattern.search(cleaned):
+            leaked.append(pattern.pattern)
+            cleaned = pattern.sub(replacement, cleaned)
+    if leaked:
+        logger.warning(
+            f"[PERSONA] Sanitização aplicada para {user_name} ({user_id}): "
+            f"padrões vazados {leaked}"
+        )
+    # remove eventuais espaços duplicados que a sub criou
+    cleaned = re.sub(r"  +", " ", cleaned).strip()
+    return cleaned
 
 
 def _inject_tracking(text: str, subscriber_id: str) -> str:

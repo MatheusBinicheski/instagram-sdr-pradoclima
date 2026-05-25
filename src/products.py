@@ -2,13 +2,13 @@ from .seguros_vida_kb import CALENDAR_GUILHERME, SEGURO_VIDA_KEYWORDS
 
 PRODUCTS = {
     "seguro_vida": {
-        "name": "Seguro de Vida — Reunião com Guilherme Rodrigues",
+        "name": "Seguro de Vida — Reunião com a assessoria do Prado",
         "description": (
-            "Reunião de planejamento com Guilherme Rodrigues, MDRT (top 1% mundial em seguros de vida), "
-            "ex-oficial AMAN, +250 clientes, R$ 1,2 bilhão em patrimônio blindado. "
-            "Para quem precisa proteger renda, família, patrimônio ou estruturar sucessão. "
-            "O SDR eleva consciência sobre os riscos (doença grave, invalidez, custo de inventário) "
-            "e agenda a conversa com o Guilherme — quem desenha o plano é ele, não o chat."
+            "Reunião de planejamento com a assessoria de seguros do Prado: top 1% mundial em "
+            "planejamento de seguros de vida, +250 clientes atendidos, +R$ 1,2 bilhão em "
+            "patrimônio blindado. Para quem precisa proteger renda, família, patrimônio ou "
+            "estruturar sucessão. O SDR (Prado) eleva consciência sobre os riscos e AGENDA a "
+            "conversa com sua equipe — quem desenha o plano é o time, não o chat."
         ),
         "beneficios": [
             "Análise modular conforme renda, idade, família e patrimônio",
@@ -16,7 +16,7 @@ PRODUCTS = {
             "Cobertura para invalidez, cirurgias e quebra de ossos",
             "Para alto patrimônio: liquidez imediata para custos de inventário (~20% do patrimônio)",
             "Isento de IR, impenhorável e livre de inventário (regra dos 3 i's)",
-            "Reunião de 30 min, sem compromisso, direto na agenda do Guilherme",
+            "Reunião de 30 min, sem compromisso, com minha equipe de planejamento",
         ],
         "link": CALENDAR_GUILHERME,
         "tipo": "reuniao_closer",
@@ -165,7 +165,7 @@ PRODUCT_LIST_TEXT = f"""
    Para pai e mãe que querem proteger a mente do filho do excesso de tela e ansiedade
    👉 https://payfast.greenn.com.br/xg846k8
 
-5️⃣ *Seguro de Vida — Reunião com Guilherme Rodrigues (MDRT)*
+5️⃣ *Seguro de Vida — Reunião com a assessoria do Prado*
    Para quem precisa proteger renda, família, patrimônio ou estruturar sucessão
    👉 {CALENDAR_GUILHERME}
 """

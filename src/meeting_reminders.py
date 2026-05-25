@@ -1,5 +1,5 @@
 """
-Lembretes de reunião com o closer (Guilherme).
+Lembretes de reunião com a assessoria de seguros do Prado.
 
 Cadência:
   • 2 DIAS ANTES — pede confirmação ("esse horário está reservado para você").
@@ -222,7 +222,7 @@ class MeetingReminderService:
         """Script base — roteiro do dono: 'esse horário está reservado pra você'."""
         when = _format_meeting_time(meeting_dt)
         return (
-            f"Bom dia, {name}. Esse horário ({when}) tá reservado pra você na agenda do Guilherme.\n\n"
+            f"Bom dia, {name}. Esse horário ({when}) tá reservado pra você na agenda da minha equipe.\n\n"
             f"Notei que você ainda não confirmou. Me confirma aqui que vai estar? "
             f"É só 30 min e você sai com clareza do que faz sentido pra blindar renda, família e patrimônio."
         )
@@ -238,7 +238,7 @@ class MeetingReminderService:
                 f"Aguardo você!"
             )
         return (
-            f"Bom dia, {name}. Nossa reunião com o Guilherme tá marcada pra hoje, {hour}.{link_line}\n\n"
+            f"Bom dia, {name}. Nossa reunião com minha assessoria tá marcada pra hoje, {hour}.{link_line}\n\n"
             f"Você ainda não confirmou. Me dá um ok aqui que você vai estar?"
         )
 
