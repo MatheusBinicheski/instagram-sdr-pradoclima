@@ -1468,25 +1468,43 @@ def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
 # Regras de sanitização de persona: o lead JAMAIS pode ver o nome real do
 # especialista de seguros que faz a reunião. Se o Claude escapar das
 # instruções, esta sanitização é a última linha de defesa.
-_PERSONA_SUBSTITUTIONS = [
+#
+# Atenção: o lead pode se chamar Guilherme. NÃO podemos atropelar o nome
+# dele. Por isso a regra solta de \bGuilherme\b é aplicada APENAS quando
+# o user_name não é Guilherme. As demais (nome completo, MDRT, AMAN,
+# ex-oficial) sempre rodam.
+_PERSONA_ALWAYS = [
     (re.compile(r"\bGuilherme\s+Rodrigues\b", re.IGNORECASE), "minha assessoria"),
-    (re.compile(r"\bo\s+Guilherme\b", re.IGNORECASE),         "minha assessoria"),
-    (re.compile(r"\bGuilherme\b",            re.IGNORECASE),  "minha equipe"),
     (re.compile(r"\bMDRT\b",                 re.IGNORECASE),  "top 1% mundial em seguros"),
     (re.compile(r"\bAMAN\b"),                                  ""),
     (re.compile(r"\bex[- ]oficial( do Ex[ée]rcito)?\b", re.IGNORECASE), ""),
 ]
+_PERSONA_WHEN_NOT_LEAD_NAME = [
+    (re.compile(r"\bo\s+Guilherme\b", re.IGNORECASE), "minha assessoria"),
+    (re.compile(r"\bGuilherme\b",     re.IGNORECASE), "minha equipe"),
+]
 
 
 def _sanitize_persona(text: str, user_id: str = "", user_name: str = "") -> str:
-    """Última linha de defesa: troca qualquer menção ao nome real do
-    especialista de seguros por linguagem genérica antes de enviar ao lead."""
+    """Última linha de defesa: troca menções ao nome real do especialista
+    por linguagem genérica. Preserva o nome do lead se ele se chamar
+    'Guilherme' — qualquer ocorrência nesse caso é considerada saudação."""
     cleaned = text
     leaked: list[str] = []
-    for pattern, replacement in _PERSONA_SUBSTITUTIONS:
+
+    for pattern, replacement in _PERSONA_ALWAYS:
         if pattern.search(cleaned):
             leaked.append(pattern.pattern)
             cleaned = pattern.sub(replacement, cleaned)
+
+    # Aplica as regras de "Guilherme solto" só se o lead NÃO se chama Guilherme
+    first_name = (user_name or "").strip().split()[0].lower() if user_name else ""
+    if first_name != "guilherme":
+        for pattern, replacement in _PERSONA_WHEN_NOT_LEAD_NAME:
+            if pattern.search(cleaned):
+                leaked.append(pattern.pattern)
+                cleaned = pattern.sub(replacement, cleaned)
+
     if leaked:
         logger.warning(
             f"[PERSONA] Sanitização aplicada para {user_name} ({user_id}): "
