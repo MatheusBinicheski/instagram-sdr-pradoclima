@@ -144,6 +144,11 @@ async def _process_debounced(user_id: str):
         if seguros_now and agenda:
             agenda_block = agenda.format_for_prompt(days_ahead=10, limit=30)
             extra_context += agenda_block + "\n\n"
+            # Marca a tag vida26_active no ManyChat (uma única vez por conversa)
+            if not conv.get("vida26_active_tagged") and reactivation_svc:
+                asyncio.create_task(_apply_vida26_tag(user_id, "vida26_active"))
+                conv["vida26_active_tagged"] = True
+                conv_manager._save()
 
         if triggered_product:
             p = PRODUCTS[triggered_product]
@@ -1462,7 +1467,31 @@ def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
     # Marca o produto pra travar fluxo e contar pra remarketing
     conv_manager.mark_link_sent(user_id, "seguro_vida")
     logger.info(f"[BOOK] Reservado {slot['iso']} para {user_name} ({user_id})")
+    # Fecha o ciclo da tag: remove vida26_active e adiciona vida26_done
+    # → o Condition no flow do ManyChat sai do loop e vai pra End Flow.
+    if reactivation_svc:
+        asyncio.create_task(_apply_vida26_done(user_id))
     return cleaned
+
+
+async def _apply_vida26_tag(user_id: str, tag_name: str):
+    """Helper async — evita bloquear o webhook em IO de tag."""
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: reactivation_svc.add_manychat_tag(user_id, tag_name)
+        )
+    except Exception as e:
+        logger.warning(f"[TAG] Falha ao adicionar {tag_name} em {user_id}: {e}")
+
+
+async def _apply_vida26_done(user_id: str):
+    """Marca o lead como vida26_done e remove vida26_active — sai do loop."""
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: reactivation_svc.add_manychat_tag(user_id, "vida26_done"))
+        await loop.run_in_executor(None, lambda: reactivation_svc.remove_manychat_tag(user_id, "vida26_active"))
+    except Exception as e:
+        logger.warning(f"[TAG] Falha ao fechar vida26 para {user_id}: {e}")
 
 
 # Regras de sanitização de persona: o lead JAMAIS pode ver o nome real do

@@ -78,21 +78,64 @@ class ReactivationService:
         logger.info(f"[MANYCHAT] Total de subscribers carregados: {len(subscribers)}")
         return subscribers
 
-    def add_manychat_tag(self, subscriber_id: str, tag_name: str) -> bool:
-        """Adiciona uma tag a um subscriber no ManyChat via API."""
+    # Cache nome → id das tags (a API atual exige tag_id, não tag_name)
+    _tag_id_cache: dict = {}
+    _tag_cache_loaded: bool = False
+
+    def _load_tag_ids(self) -> dict:
+        """Busca todas as tags da página no ManyChat e cacheia name→id."""
         if not self.manychat_key:
+            return {}
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(
+                    f"{MANYCHAT_API}/fb/page/getTags",
+                    headers={"Authorization": f"Bearer {self.manychat_key}"},
+                )
+                if resp.status_code >= 400:
+                    logger.warning(f"[MANYCHAT TAG] Falha ao listar tags {resp.status_code}: {resp.text[:200]}")
+                    return {}
+                data = resp.json().get("data", [])
+                mapping = {t.get("name", "").lower(): t.get("id") for t in data if t.get("name")}
+                self._tag_id_cache = mapping
+                self._tag_cache_loaded = True
+                logger.info(f"[MANYCHAT TAG] Cache de {len(mapping)} tags carregado.")
+                return mapping
+        except Exception as e:
+            logger.error(f"[MANYCHAT TAG] Erro ao listar tags: {e}")
+            return {}
+
+    def _resolve_tag_id(self, tag_name: str) -> Optional[int]:
+        if not self._tag_cache_loaded:
+            self._load_tag_ids()
+        tid = self._tag_id_cache.get(tag_name.lower())
+        if tid is None:
+            # tenta recarregar (caso a tag tenha sido criada agora)
+            self._load_tag_ids()
+            tid = self._tag_id_cache.get(tag_name.lower())
+        return tid
+
+    def add_manychat_tag(self, subscriber_id: str, tag_name: str) -> bool:
+        """Adiciona uma tag a um subscriber no ManyChat via API.
+
+        A API atual exige tag_id (numérico), então resolvemos nome→id em cache."""
+        if not self.manychat_key:
+            return False
+        tag_id = self._resolve_tag_id(tag_name)
+        if tag_id is None:
+            logger.warning(f"[MANYCHAT TAG] Tag '{tag_name}' não existe na conta. Crie em Audience → Tags.")
             return False
         try:
             with httpx.Client(timeout=10) as client:
                 resp = client.post(
                     f"{MANYCHAT_API}/fb/subscriber/addTag",
                     headers={"Authorization": f"Bearer {self.manychat_key}", "Content-Type": "application/json"},
-                    json={"subscriber_id": subscriber_id, "tag_name": tag_name},
+                    json={"subscriber_id": subscriber_id, "tag_id": tag_id},
                 )
                 if resp.status_code < 400:
                     logger.info(f"[MANYCHAT TAG] +{tag_name} → {subscriber_id}")
                     return True
-                logger.warning(f"[MANYCHAT TAG] Falha {resp.status_code} ao adicionar {tag_name} em {subscriber_id}: {resp.text[:150]}")
+                logger.warning(f"[MANYCHAT TAG] Falha {resp.status_code} ao adicionar {tag_name} (id={tag_id}) em {subscriber_id}: {resp.text[:150]}")
                 return False
         except Exception as e:
             logger.error(f"[MANYCHAT TAG] Erro: {e}")
@@ -102,12 +145,15 @@ class ReactivationService:
         """Remove uma tag de um subscriber no ManyChat via API."""
         if not self.manychat_key:
             return False
+        tag_id = self._resolve_tag_id(tag_name)
+        if tag_id is None:
+            return False
         try:
             with httpx.Client(timeout=10) as client:
                 resp = client.post(
                     f"{MANYCHAT_API}/fb/subscriber/removeTag",
                     headers={"Authorization": f"Bearer {self.manychat_key}", "Content-Type": "application/json"},
-                    json={"subscriber_id": subscriber_id, "tag_name": tag_name},
+                    json={"subscriber_id": subscriber_id, "tag_id": tag_id},
                 )
                 return resp.status_code < 400
         except Exception as e:
