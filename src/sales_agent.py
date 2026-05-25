@@ -200,7 +200,9 @@ class SalesAgent:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=350,
-            system=SYSTEM_PROMPT,
+            system=[
+                {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+            ],
             messages=messages,
         )
         return response.content[0].text.strip()
@@ -260,7 +262,11 @@ class SalesAgent:
         response = await self.async_client.messages.create(
             model=self.model,
             max_tokens=350,
-            system=SYSTEM_PROMPT,
+            # Prompt caching no system prompt — bloco de seguros é estável e gigante
+            # (~16k chars). Cache reduz latência das chamadas subsequentes em ~50%.
+            system=[
+                {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+            ],
             messages=messages,
         )
         return response.content[0].text.strip()

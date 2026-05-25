@@ -142,7 +142,9 @@ async def _process_debounced(user_id: str):
         # Detecta se conversa é sobre seguro de vida → injeta agenda
         seguros_now = _is_seguros_context(combined_message, history, conv)
         if seguros_now and agenda:
-            agenda_block = agenda.format_for_prompt(days_ahead=10, limit=30)
+            # Limit baixo de propósito: Claude só precisa de 8-10 slots pra oferecer 3.
+            # Lista maior aumenta latência e custo sem benefício real.
+            agenda_block = agenda.format_for_prompt(days_ahead=7, limit=10)
             extra_context += agenda_block + "\n\n"
             # Marca a tag vida26_active no ManyChat (uma única vez por conversa)
             if not conv.get("vida26_active_tagged") and reactivation_svc:
@@ -172,6 +174,9 @@ async def _process_debounced(user_id: str):
             )
 
         try:
+            # Timeout aumentado: o webhook do ManyChat já retornou vazio antes desse
+            # ponto (debounce assíncrono). A latência aqui só afeta o tempo até a DM
+            # final chegar — 15s é confortável e evita fallback estático no modo seguros.
             response_text = await asyncio.wait_for(
                 agent.generate_dm_response_async(
                     user_name=user_name,
@@ -182,7 +187,7 @@ async def _process_debounced(user_id: str):
                     attachment_url=attachment_url,
                     extra_context=extra_context,
                 ),
-                timeout=4.5,
+                timeout=15,
             )
         except asyncio.TimeoutError:
             response_text = STAGE_FALLBACKS.get(current_stage, STAGE_FALLBACKS["conexao"])
