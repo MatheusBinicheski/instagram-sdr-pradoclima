@@ -242,6 +242,9 @@ async def _purchase_followup_loop():
                     user_id = lead["user_id"]
                     user_name = lead["user_name"]
                     product_id = lead.get("product_recommended", "")
+                    # Follow-up de seguro de vida = checar se a reunião foi marcada, tom diferente
+                    if product_id == "seguro_vida":
+                        continue
                     attempt = lead.get("purchase_followup_count", 0) + 1
                     hours_since = lead.get("hours_since_link", 24)
                     product = PRODUCTS.get(product_id, {})
@@ -1246,8 +1249,12 @@ def reset_conversation(subscriber_id: str):
 
 
 def _inject_tracking(text: str, subscriber_id: str) -> str:
-    """Adiciona ?ref=SUBSCRIBER_ID em qualquer link Greenn gerado pelo Claude."""
-    for product in PRODUCTS.values():
+    """Adiciona ?ref=SUBSCRIBER_ID em qualquer link Greenn gerado pelo Claude.
+
+    Pula links que não são de checkout (ex.: agenda do Google Calendar do seguro de vida)."""
+    for pid, product in PRODUCTS.items():
+        if product.get("tipo") == "reuniao_closer":
+            continue
         base = product["link"].split("?")[0]
         if base in text:
             text = text.replace(base, f"{base}?ref={subscriber_id}")
@@ -1272,6 +1279,7 @@ def _detect_link_sent(text: str) -> Optional[str]:
         "a_arte_de_precificar": "payfast.greenn.com.br/65471",
         "estrategias_vendas_digital": "pages.eduprado.com.br/estrategias-de-vendas-no-digital",
         "blindar_mente_filho": "payfast.greenn.com.br/xg846k8",
+        "seguro_vida": "calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ1GjM29rB7AL",
     }
     for product_id, fragment in links.items():
         if fragment in text:

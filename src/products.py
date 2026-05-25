@@ -1,4 +1,29 @@
+from .seguros_vida_kb import CALENDAR_GUILHERME, SEGURO_VIDA_KEYWORDS
+
 PRODUCTS = {
+    "seguro_vida": {
+        "name": "Seguro de Vida — Reunião com Guilherme Rodrigues",
+        "description": (
+            "Reunião de planejamento com Guilherme Rodrigues, MDRT (top 1% mundial em seguros de vida), "
+            "ex-oficial AMAN, +250 clientes, R$ 1,2 bilhão em patrimônio blindado. "
+            "Para quem precisa proteger renda, família, patrimônio ou estruturar sucessão. "
+            "O SDR eleva consciência sobre os riscos (doença grave, invalidez, custo de inventário) "
+            "e agenda a conversa com o Guilherme — quem desenha o plano é ele, não o chat."
+        ),
+        "beneficios": [
+            "Análise modular conforme renda, idade, família e patrimônio",
+            "Proteção de renda durante doença grave (cobre 6 a 24 meses do padrão de vida)",
+            "Cobertura para invalidez, cirurgias e quebra de ossos",
+            "Para alto patrimônio: liquidez imediata para custos de inventário (~20% do patrimônio)",
+            "Isento de IR, impenhorável e livre de inventário (regra dos 3 i's)",
+            "Reunião de 30 min, sem compromisso, direto na agenda do Guilherme",
+        ],
+        "link": CALENDAR_GUILHERME,
+        "tipo": "reuniao_closer",
+        "preco": "Sob medida (definido na reunião)",
+        "garantia": "Conversa sem compromisso",
+        "palavras_chave": SEGURO_VIDA_KEYWORDS,
+    },
     "o_mapa_convencer": {
         "name": "O Mapa para Convencer Qualquer Cliente",
         "description": (
@@ -121,7 +146,7 @@ PRODUCTS = {
     },
 }
 
-PRODUCT_LIST_TEXT = """
+PRODUCT_LIST_TEXT = f"""
 📌 *PRODUTOS DO EDUARDO PRADO:*
 
 1️⃣ *O Mapa para Convencer Qualquer Cliente*
@@ -139,4 +164,8 @@ PRODUCT_LIST_TEXT = """
 4️⃣ *10 Passos para Blindar a Mente do Seu Filho*
    Para pai e mãe que querem proteger a mente do filho do excesso de tela e ansiedade
    👉 https://payfast.greenn.com.br/xg846k8
+
+5️⃣ *Seguro de Vida — Reunião com Guilherme Rodrigues (MDRT)*
+   Para quem precisa proteger renda, família, patrimônio ou estruturar sucessão
+   👉 {CALENDAR_GUILHERME}
 """
