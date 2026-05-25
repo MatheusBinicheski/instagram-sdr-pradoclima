@@ -198,7 +198,7 @@ class SalesAgent:
 
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=200,
+            max_tokens=350,
             system=SYSTEM_PROMPT,
             messages=messages,
         )
@@ -258,7 +258,7 @@ class SalesAgent:
 
         response = await self.async_client.messages.create(
             model=self.model,
-            max_tokens=200,
+            max_tokens=350,
             system=SYSTEM_PROMPT,
             messages=messages,
         )
