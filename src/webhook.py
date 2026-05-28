@@ -240,13 +240,17 @@ async def _process_debounced(user_id: str):
             safe = _inject_tracking(safe, user_id)
 
         import httpx as _httpx
-        parts = [p.strip() for p in safe.split("\n\n") if p.strip()] or [safe]
-        full_text = "\n\n".join(parts)
+        bubbles = _split_into_bubbles(safe, max_chars=180)
+        if any(len(b) > 220 for b in bubbles):
+            logger.warning(
+                f"[BUBBLES] Algum balão saiu acima do limite ({[len(b) for b in bubbles]}) "
+                f"para {user_name} ({user_id}). Mensagem pode estar pesada."
+            )
         payload = {
             "subscriber_id": user_id,
             "data": {"version": "v2", "content": {
                 "type": "instagram",
-                "messages": [{"type": "text", "text": full_text}],
+                "messages": [{"type": "text", "text": b} for b in bubbles],
                 "actions": [], "quick_replies": [],
             }},
         }
@@ -1710,6 +1714,55 @@ def _sanitize_persona(text: str, user_id: str = "", user_name: str = "") -> str:
     # remove eventuais espaços duplicados que a sub criou
     cleaned = re.sub(r"  +", " ", cleaned).strip()
     return cleaned
+
+
+def _split_into_bubbles(text: str, max_chars: int = 180) -> list[str]:
+    """Quebra a resposta do Claude em balões curtos pra DM, simulando conversa real.
+
+    Estratégia em camadas:
+    1. Quebra por \\n\\n (separação que o Claude usa pra parágrafos).
+    2. Cada bloco que ainda passa do limite é quebrado por sentença (. ? !).
+    3. Como último recurso, junta sentenças curtas adjacentes pra não estourar
+       em balões de 1 palavra.
+
+    Garante que LINKs (URLs) e marcadores não são partidos no meio.
+    """
+    text = (text or "").strip()
+    if not text:
+        return [""]
+
+    raw_blocks = [p.strip() for p in text.split("\n\n") if p.strip()]
+    bubbles: list[str] = []
+    for block in raw_blocks:
+        if len(block) <= max_chars:
+            bubbles.append(block)
+            continue
+        # Bloco maior que o limite: quebra por sentença.
+        sentences = re.split(r"(?<=[.!?])\s+", block)
+        current = ""
+        for s in sentences:
+            s = s.strip()
+            if not s:
+                continue
+            # Se a sentença sozinha estoura, ainda envia inteira (não vai partir URL).
+            if len(s) > max_chars:
+                if current:
+                    bubbles.append(current.strip())
+                    current = ""
+                bubbles.append(s)
+                continue
+            # Tenta juntar com o balão corrente se ainda couber.
+            tentative = f"{current} {s}".strip() if current else s
+            if len(tentative) <= max_chars:
+                current = tentative
+            else:
+                if current:
+                    bubbles.append(current.strip())
+                current = s
+        if current:
+            bubbles.append(current.strip())
+
+    return bubbles or [text]
 
 
 def _inject_tracking(text: str, subscriber_id: str) -> str:
