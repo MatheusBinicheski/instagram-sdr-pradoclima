@@ -186,7 +186,7 @@ async def _process_debounced(user_id: str):
                 f"Continue focado em fechar ESTE produto: trate objeção, tire dúvida, "
                 f"reforce a garantia de 7 dias, ou reenvie o MESMO link se for o caso. "
                 f"Frases como 'quero essa condição', 'topei', 'me manda', 'manda aí' "
-                f"significam interesse NESTE produto — fecha aqui."
+                f"significam interesse NESTE produto, fecha aqui."
             )
 
         try:

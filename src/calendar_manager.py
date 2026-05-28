@@ -268,7 +268,7 @@ class CalendarManager:
             "guestName": name,
             "startISO": start_dt.isoformat(),
             "endISO": end_dt.isoformat(),
-            "summary": f"Reunião — Seguro de Vida — {name}",
+            "summary": f"Reunião de Seguro de Vida com {name}",
             "description": description,
         }
         try:
@@ -293,7 +293,7 @@ class CalendarManager:
     def _create_via_service_account(self, name, email, start_dt, end_dt, description) -> dict:
         rid = hashlib.md5(f"{email}-{start_dt.isoformat()}".encode()).hexdigest()[:12]
         body = {
-            "summary": f"Reunião — Seguro de Vida — {name}",
+            "summary": f"Reunião de Seguro de Vida com {name}",
             "description": description,
             "start": {"dateTime": start_dt.isoformat(), "timeZone": TIMEZONE},
             "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
@@ -331,7 +331,7 @@ class CalendarManager:
         end_utc = end_dt.astimezone(TZ_UTC) if end_dt.tzinfo else (start_dt + timedelta(minutes=30)).astimezone(TZ_UTC)
 
         dates = f"{start_utc.strftime('%Y%m%dT%H%M%SZ')}/{end_utc.strftime('%Y%m%dT%H%M%SZ')}"
-        title = quote(f"Reunião — Seguro de Vida — {name}")
+        title = quote(f"Reunião de Seguro de Vida com {name}")
         details = quote("Reunião de descoberta com a assessoria do Prado.")
 
         link = (

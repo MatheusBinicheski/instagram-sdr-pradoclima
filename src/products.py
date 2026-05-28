@@ -2,13 +2,13 @@ from .seguros_vida_kb import CALENDAR_GUILHERME, SEGURO_VIDA_KEYWORDS
 
 PRODUCTS = {
     "seguro_vida": {
-        "name": "Seguro de Vida — Reunião com a assessoria do Prado",
+        "name": "Seguro de Vida, Reunião com a assessoria do Prado",
         "description": (
             "Reunião de planejamento com a assessoria de seguros do Prado: top 1% mundial em "
             "planejamento de seguros de vida, +250 clientes atendidos, +R$ 1,2 bilhão em "
             "patrimônio blindado. Para quem precisa proteger renda, família, patrimônio ou "
             "estruturar sucessão. O SDR (Prado) eleva consciência sobre os riscos e AGENDA a "
-            "conversa com sua equipe — quem desenha o plano é o time, não o chat."
+            "conversa com sua equipe, quem desenha o plano é o time, não o chat."
         ),
         "beneficios": [
             "Análise modular conforme renda, idade, família e patrimônio",
@@ -37,7 +37,7 @@ PRODUCTS = {
             "Vocabulário de vendas que gera confiança e fecha negócio",
             "Pitch de vendas irresistível, estruturado do zero",
             "Como tratar objeção de preço sem dar desconto",
-            "Implementação imediata — 3 módulos práticos",
+            "Implementação imediata, 3 módulos práticos",
         ],
         "link": "https://payfast.greenn.com.br/66110/offer/ocsaui",
         "tipo": "curso_online",
@@ -60,7 +60,7 @@ PRODUCTS = {
             "que faturam mas não sobra nada no final do mês."
         ),
         "beneficios": [
-            "Planilhas automatizadas — você preenche e o sistema calcula tudo",
+            "Planilhas automatizadas, você preenche e o sistema calcula tudo",
             "Saber exatamente quanto cada serviço ou produto precisa custar para lucrar",
             "Parar de trabalhar de graça sem perceber",
             "Liberdade para contratar sem medo de queimar o caixa",
@@ -92,7 +92,7 @@ PRODUCTS = {
             "10 passos práticos para blindar a mente do seu filho",
             "Como lidar com excesso de telas, ansiedade e comparação social",
             "Fortalecer identidade e caráter da criança desde cedo",
-            "Conversas reais entre pai/mãe e filho — sem terceirizar a educação",
+            "Conversas reais entre pai/mãe e filho, sem terceirizar a educação",
             "Aplicável no dia a dia, sem teoria sem fim",
         ],
         "link": "https://payfast.greenn.com.br/xg846k8",
@@ -122,10 +122,10 @@ PRODUCTS = {
         ),
         "beneficios": [
             "Estratégia de vendas digital que gera demanda real (não só engajamento)",
-            "Posicionamento diferenciado — você é escolhido, não comparado",
+            "Posicionamento diferenciado, você é escolhido, não comparado",
             "Atrai o cliente certo e afasta o caçador de desconto",
             "Conversas mais qualificadas e ciclo de venda mais curto",
-            "Mais previsibilidade e controle do faturamento — menos dependência de indicação",
+            "Mais previsibilidade e controle do faturamento, menos dependência de indicação",
             "Bônus: 1 aula ao vivo da Mentoria PIL + Checklist Estratégico",
         ],
         "link": "https://pages.eduprado.com.br/estrategias-de-vendas-no-digital/",
@@ -150,22 +150,22 @@ PRODUCT_LIST_TEXT = f"""
 📌 *PRODUTOS DO EDUARDO PRADO:*
 
 1️⃣ *O Mapa para Convencer Qualquer Cliente*
-   Quebra objeções e fecha vendas — 16 aulas práticas por R$ 19,90
+   Quebra objeções e fecha vendas, 16 aulas práticas por R$ 19,90
    👉 https://payfast.greenn.com.br/66110/offer/ocsaui
 
 2️⃣ *A Arte de Precificar*
-   Planilhas automatizadas para precificar certo e lucrar de verdade — R$ 97
+   Planilhas automatizadas para precificar certo e lucrar de verdade, R$ 97
    👉 https://payfast.greenn.com.br/65471/offer/V0XWPt
 
 3️⃣ *Aulão Estratégias de Vendas e Posicionamento no Digital (Método 26)*
-   Os 6 passos para vender de verdade no digital — R$ 197 (12x R$ 20,25)
+   Os 6 passos para vender de verdade no digital, R$ 197 (12x R$ 20,25)
    👉 https://pages.eduprado.com.br/estrategias-de-vendas-no-digital/
 
 4️⃣ *10 Passos para Blindar a Mente do Seu Filho*
    Para pai e mãe que querem proteger a mente do filho do excesso de tela e ansiedade
    👉 https://payfast.greenn.com.br/xg846k8
 
-5️⃣ *Seguro de Vida — Reunião com a assessoria do Prado*
+5️⃣ *Seguro de Vida, Reunião com a assessoria do Prado*
    Para quem precisa proteger renda, família, patrimônio ou estruturar sucessão
    👉 {CALENDAR_GUILHERME}
 """
