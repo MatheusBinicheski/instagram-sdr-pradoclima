@@ -507,7 +507,9 @@ def agenda_health():
 class AgendaBookPayload(BaseModel):
     iso: str                       # ISO 8601 do slot (ex.: "2026-06-04T10:00:00-03:00")
     user_name: str = "Lead"
-    user_email: Optional[str] = "" # opcional — se vier, o lead vira attendee e recebe convite
+    user_email: Optional[str] = "" # se vier, o lead vira attendee e recebe convite
+    whatsapp: Optional[str] = ""   # vai pra descrição do evento
+    qualification: Optional[str] = ""  # pré-qualificação pro closer
     subscriber_id: Optional[str] = ""  # ManyChat subscriber_id — se vier, dispara cadência de lembretes
 
 
@@ -522,6 +524,8 @@ def agenda_book(payload: AgendaBookPayload):
         subscriber_id=subscriber,
         user_name=payload.user_name,
         user_email=payload.user_email or "",
+        whatsapp=payload.whatsapp or "",
+        qualification=payload.qualification or "",
     )
     if not result:
         raise HTTPException(status_code=409, detail="Slot indisponível ou criação do evento falhou.")
@@ -529,7 +533,57 @@ def agenda_book(payload: AgendaBookPayload):
         if payload.subscriber_id not in conv_manager.conversations:
             conv_manager.get_or_create(payload.subscriber_id, payload.user_name)
         meeting_svc.schedule(payload.subscriber_id, result["iso"], meet_link=result.get("meet_link", ""))
+        conv = conv_manager.conversations.get(payload.subscriber_id)
+        if conv is not None:
+            conv["meeting_event_id"] = result.get("event_id", "")
+            if payload.user_email:
+                conv["lead_email"] = payload.user_email
+            if payload.whatsapp:
+                conv["lead_whatsapp"] = payload.whatsapp
+            if payload.qualification:
+                conv["lead_qualification"] = payload.qualification
+            conv_manager._save()
     return result
+
+
+class AgendaCancelPayload(BaseModel):
+    event_id: Optional[str] = ""        # cancela diretamente pelo eventId
+    subscriber_id: Optional[str] = ""   # OU pelo subscriber (busca event_id no conv)
+    notify_attendees: bool = True       # avisa o lead via email (se ele era attendee)
+
+
+@app.post("/agenda/cancel")
+def agenda_cancel(payload: AgendaCancelPayload):
+    """Cancela um evento na agenda do Guilherme.
+
+    Aceita event_id direto (pra cleanup/testes) OU subscriber_id (busca o
+    evento na conversa). Quando vier subscriber_id, também marca como cancelado
+    no meeting_svc — corta a cadência de lembretes."""
+    if not calendar_mgr:
+        raise HTTPException(status_code=503, detail="CalendarManager não inicializado.")
+
+    event_id = (payload.event_id or "").strip()
+    sub_id = (payload.subscriber_id or "").strip()
+
+    if not event_id and sub_id and conv_manager:
+        conv = conv_manager.conversations.get(sub_id) or {}
+        event_id = (conv.get("meeting_event_id") or "").strip()
+
+    if not event_id:
+        raise HTTPException(status_code=400, detail="event_id ou subscriber_id com reunião agendada são obrigatórios.")
+
+    result = calendar_mgr.cancel_meeting(event_id, notify_attendees=payload.notify_attendees)
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=f"Falha ao cancelar evento: {result.get('error')}")
+
+    if sub_id and meeting_svc and conv_manager and sub_id in conv_manager.conversations:
+        meeting_svc.mark_cancelled(sub_id)
+        conv = conv_manager.conversations.get(sub_id)
+        if conv is not None:
+            conv["meeting_event_id"] = ""
+            conv_manager._save()
+
+    return {"cancelled": True, "event_id": event_id, "subscriber_id": sub_id or None}
 
 
 # ─── Reuniões com a assessoria ──────────────────────────────────────────────
@@ -569,12 +623,29 @@ def meeting_confirm(subscriber_id: str):
 
 @app.post("/meeting/{subscriber_id}/cancel")
 def meeting_cancel(subscriber_id: str):
-    if not meeting_svc:
+    """Cancela a reunião — corta lembretes E apaga o evento na agenda do Guilherme."""
+    if not meeting_svc or not conv_manager:
         raise HTTPException(status_code=503, detail="Bot não inicializado.")
     ok = meeting_svc.mark_cancelled(subscriber_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversa não encontrada.")
-    return {"message": "reunião cancelada", "subscriber_id": subscriber_id}
+    # Apaga o evento na agenda do Guilherme (se houver event_id salvo).
+    cancel_result = None
+    conv = conv_manager.conversations.get(subscriber_id) or {}
+    event_id = (conv.get("meeting_event_id") or "").strip()
+    if event_id and calendar_mgr:
+        cancel_result = calendar_mgr.cancel_meeting(event_id, notify_attendees=True)
+        if cancel_result.get("success"):
+            conv["meeting_event_id"] = ""
+            conv_manager._save()
+            logger.info(f"[MEETING] Evento {event_id} apagado da agenda do Guilherme.")
+        else:
+            logger.warning(f"[MEETING] Falha ao apagar evento {event_id}: {cancel_result.get('error')}")
+    return {
+        "message": "reunião cancelada",
+        "subscriber_id": subscriber_id,
+        "calendar_cancelled": bool(cancel_result and cancel_result.get("success")),
+    }
 
 
 @app.post("/meeting/tick")
@@ -1471,25 +1542,69 @@ def _is_seguros_context(message: str, history: list[dict], conv: dict) -> bool:
     return False
 
 
-# Marcador de reserva — Claude inclui [BOOK: ISO_8601] quando o lead confirma slot
+# Marcador de reserva — Claude inclui [BOOK: ...] quando o lead confirma slot.
+# Formato novo (preferido): ISO=... | EMAIL=... | WHATSAPP=... | QUAL=...
+# Formato legado (compat): apenas a ISO crua, sem chaves.
 _BOOK_MARKER_RE = re.compile(r"^[ \t]*\[BOOK:\s*([^\]]+)\][ \t]*\n?", re.IGNORECASE | re.MULTILINE)
+
+_KEY_ALIASES = {
+    "iso": "iso", "datetime": "iso", "data": "iso",
+    "email": "email", "e-mail": "email", "mail": "email",
+    "whatsapp": "whatsapp", "wpp": "whatsapp", "telefone": "whatsapp",
+    "phone": "whatsapp", "tel": "whatsapp", "fone": "whatsapp",
+    "qual": "qual", "qualificacao": "qual", "qualificação": "qual",
+    "pre-qual": "qual", "summary": "qual", "resumo": "qual",
+}
+
+
+def _parse_book_payload(content: str) -> dict:
+    """Parseia o conteúdo do [BOOK: ...]. Tolera ordem variável, espaços e o
+    formato legado (apenas ISO crua)."""
+    content = content.strip()
+    if "=" not in content:
+        # Formato legado: só a ISO.
+        return {"iso": content}
+
+    out: dict = {}
+    parts = re.split(r"\s*\|\s*", content)
+    for p in parts:
+        if "=" not in p:
+            continue
+        key, value = p.split("=", 1)
+        norm_key = _KEY_ALIASES.get(key.strip().lower())
+        if not norm_key:
+            continue
+        out[norm_key] = value.strip()
+    return out
 
 
 def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
-    """Detecta '[BOOK: ISO]' na resposta do Claude e dispara a reserva real.
+    """Detecta '[BOOK: ...]' na resposta do Claude e dispara a reserva real.
     Remove a linha do marcador antes de enviar pro lead."""
     m = _BOOK_MARKER_RE.search(text)
     if not m:
         return text
-    iso = m.group(1).strip()
+    payload = _parse_book_payload(m.group(1))
     cleaned = _BOOK_MARKER_RE.sub("", text).strip()
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+    iso = payload.get("iso", "").strip()
+    if not iso:
+        logger.warning(f"[BOOK] Marcador sem ISO — {user_name} ({user_id}). Conteúdo: {m.group(1)[:120]}")
+        return cleaned
 
     if not agenda or not meeting_svc:
         logger.warning(f"[BOOK] Marcador encontrado mas agenda/meeting_svc não estão prontos.")
         return cleaned
 
-    slot = agenda.reserve(iso, user_id, user_name=user_name or "Lead")
+    slot = agenda.reserve(
+        iso=iso,
+        subscriber_id=user_id,
+        user_name=user_name or "Lead",
+        user_email=payload.get("email", ""),
+        whatsapp=payload.get("whatsapp", ""),
+        qualification=payload.get("qual", ""),
+    )
     if not slot:
         logger.warning(f"[BOOK] Slot {iso} indisponível ou criação falhou — {user_name} ({user_id}).")
         return cleaned + (
@@ -1498,12 +1613,27 @@ def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
         )
 
     meet_link = slot.get("meet_link") or ""
+    event_id = slot.get("event_id") or ""
     meeting_svc.schedule(user_id, slot["iso"], meet_link=meet_link)
-    # Marca o produto pra travar fluxo e contar pra remarketing
-    conv_manager.mark_link_sent(user_id, "seguro_vida")
+    # Guarda contato + event_id no conv pra cancel/lembretes posteriores.
+    if conv_manager:
+        conv_manager.mark_link_sent(user_id, "seguro_vida")
+        conv = conv_manager.conversations.get(user_id)
+        if conv is not None:
+            conv["meeting_event_id"] = event_id
+            if payload.get("email"):
+                conv["lead_email"] = payload["email"]
+            if payload.get("whatsapp"):
+                conv["lead_whatsapp"] = payload["whatsapp"]
+            if payload.get("qual"):
+                conv["lead_qualification"] = payload["qual"]
+            conv_manager._save()
     logger.info(
-        f"[BOOK] Reservado {slot['iso']} para {user_name} ({user_id}) "
-        f"— mode={slot.get('mode')} meet={'sim' if meet_link else 'nao'}"
+        f"[BOOK] Reservado {slot['iso']} para {user_name} ({user_id}) — "
+        f"event_id={event_id} mode={slot.get('mode')} "
+        f"email={'sim' if payload.get('email') else 'nao'} "
+        f"wpp={'sim' if payload.get('whatsapp') else 'nao'} "
+        f"qual={'sim' if payload.get('qual') else 'nao'}"
     )
     # Fecha o ciclo da tag: remove vida26_active e adiciona vida26_done
     # → o Condition no flow do ManyChat sai do loop e vai pra End Flow.

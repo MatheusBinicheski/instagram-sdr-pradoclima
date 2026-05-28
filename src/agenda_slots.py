@@ -126,6 +126,8 @@ class AgendaSlots:
         subscriber_id: str,
         user_name: str = "Lead",
         user_email: str = "",
+        whatsapp: str = "",
+        qualification: str = "",
     ) -> Optional[dict]:
         """Cria o evento real na agenda do Guilherme via CalendarManager.
 
@@ -159,6 +161,9 @@ class AgendaSlots:
                 prospect_email=user_email,
                 start_dt=dt,
                 duration_minutes=30,
+                whatsapp=whatsapp,
+                qualification=qualification,
+                subscriber_id=subscriber_id,
             )
         except Exception as e:
             logger.error(f"[AGENDA] create_meeting exceção: {e}")

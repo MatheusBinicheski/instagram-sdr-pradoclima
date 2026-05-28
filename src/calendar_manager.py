@@ -185,29 +185,81 @@ class CalendarManager:
         prospect_email: str,
         start_dt: Optional[datetime] = None,
         duration_minutes: int = 30,
+        whatsapp: str = "",
+        qualification: str = "",
+        subscriber_id: str = "",
     ) -> dict:
-        """Cria reunião. Retorna success=True com meet_link/event_link."""
+        """Cria reunião. Retorna success=True com meet_link/event_link.
+
+        `qualification` é o resumo do bot pra descrição do evento — o closer
+        chega na reunião sabendo o contexto do lead.
+        """
         if start_dt is None:
             start_dt = self.next_business_slot()
         if start_dt.tzinfo is None:
             start_dt = start_dt.replace(tzinfo=TZ)
         end_dt = start_dt + timedelta(minutes=duration_minutes)
 
+        description = _build_event_description(
+            name=prospect_name,
+            email=prospect_email,
+            whatsapp=whatsapp,
+            subscriber_id=subscriber_id,
+            qualification=qualification,
+        )
+
         if self.script_url:
-            result = self._create_via_script(prospect_name, prospect_email, start_dt, end_dt)
+            result = self._create_via_script(prospect_name, prospect_email, start_dt, end_dt, description)
             if result.get("success"):
                 return result
             logger.warning(f"[CALENDAR] Apps Script falhou: {result.get('error')}")
 
         if self._service:
-            result = self._create_via_service_account(prospect_name, prospect_email, start_dt, end_dt)
+            result = self._create_via_service_account(prospect_name, prospect_email, start_dt, end_dt, description)
             if result.get("success"):
                 return result
             logger.warning(f"[CALENDAR] Service Account falhou: {result.get('error')}")
 
         return self._create_calendar_link(prospect_name, prospect_email, start_dt, end_dt)
 
-    def _create_via_script(self, name, email, start_dt, end_dt) -> dict:
+    def cancel_meeting(self, event_id: str, notify_attendees: bool = True) -> dict:
+        """Cancela evento na agenda do Guilherme."""
+        if not event_id:
+            return {"success": False, "error": "event_id required"}
+        if self.script_url:
+            return self._cancel_via_script(event_id, notify_attendees)
+        if self._service:
+            return self._cancel_via_service_account(event_id, notify_attendees)
+        return {"success": False, "error": "no real calendar channel — cannot cancel"}
+
+    def _cancel_via_script(self, event_id: str, notify_attendees: bool) -> dict:
+        payload = {
+            "secret": self.script_secret,
+            "op": "cancelEvent",
+            "calendarId": self.calendar_id,
+            "eventId": event_id,
+            "notifyAttendees": bool(notify_attendees),
+        }
+        try:
+            with httpx.Client(timeout=20, follow_redirects=True) as client:
+                resp = client.post(self.script_url, json=payload)
+                data = resp.json()
+            return data
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _cancel_via_service_account(self, event_id: str, notify_attendees: bool) -> dict:
+        try:
+            self._service.events().delete(
+                calendarId=self.calendar_id,
+                eventId=event_id,
+                sendUpdates="all" if notify_attendees else "none",
+            ).execute()
+            return {"success": True, "eventId": event_id, "cancelled": True}
+        except Exception as e:
+            return {"success": False, "error": str(e), "eventId": event_id}
+
+    def _create_via_script(self, name, email, start_dt, end_dt, description) -> dict:
         payload = {
             "secret": self.script_secret,
             "op": "createEvent",
@@ -217,7 +269,7 @@ class CalendarManager:
             "startISO": start_dt.isoformat(),
             "endISO": end_dt.isoformat(),
             "summary": f"Reunião — Seguro de Vida — {name}",
-            "description": "Reunião de descoberta com a assessoria do Prado (seguro de vida / sucessão patrimonial).",
+            "description": description,
         }
         try:
             with httpx.Client(timeout=25, follow_redirects=True) as client:
@@ -238,11 +290,11 @@ class CalendarManager:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _create_via_service_account(self, name, email, start_dt, end_dt) -> dict:
+    def _create_via_service_account(self, name, email, start_dt, end_dt, description) -> dict:
         rid = hashlib.md5(f"{email}-{start_dt.isoformat()}".encode()).hexdigest()[:12]
         body = {
             "summary": f"Reunião — Seguro de Vida — {name}",
-            "description": "Reunião de descoberta com a assessoria do Prado.",
+            "description": description,
             "start": {"dateTime": start_dt.isoformat(), "timeZone": TIMEZONE},
             "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
             "conferenceData": {"createRequest": {"requestId": rid, "conferenceSolutionKey": {"type": "hangoutsMeet"}}},
@@ -324,3 +376,30 @@ def _overlaps_any(start: datetime, end: datetime, intervals: list[tuple[datetime
         if start < be and bs < end:
             return True
     return False
+
+
+def _build_event_description(
+    name: str,
+    email: str = "",
+    whatsapp: str = "",
+    subscriber_id: str = "",
+    qualification: str = "",
+) -> str:
+    """Monta a descrição do evento com tudo que o closer precisa pra chegar pronto."""
+    lines = ["Reunião agendada via bot SDR do @pradoclima.", ""]
+    lines.append("CONTATO DO LEAD")
+    lines.append(f"  Nome:     {name or '(não informado)'}")
+    lines.append(f"  Email:    {email or '(não informado)'}")
+    lines.append(f"  WhatsApp: {whatsapp or '(não informado)'}")
+    if subscriber_id:
+        lines.append(f"  Instagram (ManyChat ID): {subscriber_id}")
+    lines.append("")
+    lines.append("PRÉ-QUALIFICAÇÃO DO BOT")
+    if qualification:
+        lines.append(qualification.strip())
+    else:
+        lines.append("(sem síntese — explore na call)")
+    lines.append("")
+    lines.append("---")
+    lines.append("Reunião de descoberta sobre seguro de vida / sucessão patrimonial.")
+    return "\n".join(lines)

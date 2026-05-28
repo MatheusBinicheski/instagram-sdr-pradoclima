@@ -1,10 +1,11 @@
 /**
  * Apps Script relay — agenda do Guilherme (closer de seguros).
  *
- * Roda como grsouza93ip@gmail.com. Dois endpoints:
+ * Roda como grsouza93ip@gmail.com. Endpoints (op):
  *
- *   op=freebusy     → devolve intervalos ocupados em uma janela
- *   op=createEvent  → cria evento com Google Meet automático
+ *   freebusy     → devolve intervalos ocupados em uma janela
+ *   createEvent  → cria evento com Google Meet automático
+ *   cancelEvent  → cancela evento por eventId (lead remarcou ou faltou)
  *
  * --- DEPLOY (passo a passo) ---
  *
@@ -34,6 +35,7 @@ function doPost(e) {
     const op = body.op || 'createEvent';
     if (op === 'freebusy')    return _json(handleFreebusy(body));
     if (op === 'createEvent') return _json(handleCreateEvent(body));
+    if (op === 'cancelEvent') return _json(handleCancelEvent(body));
     if (op === 'ping')        return _json({ success: true, runningAs: Session.getActiveUser().getEmail() });
     return _json({ success: false, error: 'unknown op: ' + op });
   } catch (err) {
@@ -143,6 +145,21 @@ function handleCreateEvent(body) {
     eventLink: created.htmlLink || '',
     startTimeFormatted: formatted,
   };
+}
+
+function handleCancelEvent(body) {
+  const calendarId = body.calendarId || DEFAULT_CALENDAR;
+  const eventId = body.eventId;
+  const notify = body.notifyAttendees === false ? 'none' : 'all';
+  if (!eventId) {
+    return { success: false, error: 'eventId required' };
+  }
+  try {
+    Calendar.Events.remove(calendarId, eventId, { sendUpdates: notify });
+    return { success: true, eventId: eventId, cancelled: true };
+  } catch (e) {
+    return { success: false, error: String(e), eventId: eventId };
+  }
 }
 
 function _json(obj) {
