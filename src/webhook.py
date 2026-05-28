@@ -17,6 +17,7 @@ from .conversation_manager import ConversationManager
 from .reactivation import ReactivationService
 from .meeting_reminders import MeetingReminderService
 from .agenda_slots import AgendaSlots
+from .calendar_manager import CalendarManager
 from .config import Config
 from .products import PRODUCTS
 from .seguros_vida_kb import SEGURO_VIDA_KEYWORDS
@@ -30,6 +31,7 @@ conv_manager: ConversationManager = None
 reactivation_svc: ReactivationService = None
 meeting_svc: MeetingReminderService = None
 agenda: AgendaSlots = None
+calendar_mgr: CalendarManager = None
 
 # Debounce: acumula mensagens rápidas e processa como bloco único
 DEBOUNCE_DELAY = 4  # segundos de silêncio antes de processar
@@ -39,7 +41,7 @@ _message_buffers: dict[str, list[dict]] = {}  # user_id → lista de payloads
 
 @app.on_event("startup")
 async def startup():
-    global agent, conv_manager, reactivation_svc, agenda
+    global agent, conv_manager, reactivation_svc, agenda, calendar_mgr
     if not Config.ANTHROPIC_API_KEY:
         logger.error("ANTHROPIC_API_KEY não configurada! Adicione em Railway → Variables.")
     else:
@@ -47,8 +49,22 @@ async def startup():
         logger.info("Sales Agent (Eduardo Prado) inicializado.")
     conv_manager = ConversationManager()
     logger.info("ConversationManager inicializado.")
-    agenda = AgendaSlots()
-    logger.info(f"AgendaSlots inicializada — {len([s for s in agenda.slots if s['status'] == 'available'])} slots disponíveis.")
+
+    calendar_mgr = CalendarManager(
+        script_url=Config.GOOGLE_SCRIPT_URL,
+        script_secret=Config.GOOGLE_SCRIPT_SECRET,
+        service_account_json=Config.GOOGLE_SERVICE_ACCOUNT_JSON,
+        calendar_id=Config.GUILHERME_CALENDAR_ID,
+    )
+    if not calendar_mgr.has_real_calendar():
+        logger.warning(
+            "[STARTUP] Sem GOOGLE_SCRIPT_URL nem GOOGLE_SERVICE_ACCOUNT_JSON — "
+            "o bot vai usar grade estática e NÃO criará eventos reais."
+        )
+
+    agenda = AgendaSlots(calendar_manager=calendar_mgr)
+    initial = len(agenda.list_available(days_ahead=7))
+    logger.info(f"AgendaSlots inicializada — {initial} slots livres na próxima semana.")
 
     if agent and conv_manager:
         reactivation_svc = ReactivationService(
@@ -457,50 +473,35 @@ async def manychat_comment_webhook(payload: ManyChatPayload):
 
 
 # ─── Agenda de slots ────────────────────────────────────────────────────────
-
-class AgendaSlotsAddPayload(BaseModel):
-    slots: list[str]  # lista de ISO 8601 (com ou sem tz; assume BRT se sem)
-
-
-@app.post("/agenda/slots")
-def agenda_add_slots(payload: AgendaSlotsAddPayload):
-    if not agenda:
-        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
-    added = agenda.add_slots(payload.slots)
-    return {"added": added, "total": len(agenda.slots)}
-
-
-@app.delete("/agenda/slots")
-def agenda_remove_slot(iso: str):
-    if not agenda:
-        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
-    ok = agenda.remove_slot(iso)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Slot não encontrado.")
-    return {"removed": iso}
-
+# A agenda agora é apenas leitura — fonte da verdade é o Google Calendar do
+# Guilherme (grsouza93ip@gmail.com). Para bloquear um horário, basta criar um
+# evento direto no Calendar dele que o bot deixa de oferecê-lo.
 
 @app.get("/agenda/available")
-def agenda_list_available(days: int = 14, period: Optional[str] = None):
+def agenda_list_available(days: int = 7, period: Optional[str] = None):
     if not agenda:
         raise HTTPException(status_code=503, detail="Agenda não inicializada.")
     slots = agenda.list_available(days_ahead=days, period=period)
     return {
         "total": len(slots),
-        "slots": [
-            {"iso": s["iso"], "status": s["status"], "reserved_by": s["reserved_by"]}
-            for s in slots
-        ],
+        "slots": [{"iso": s["iso"], "status": s["status"]} for s in slots],
     }
 
 
-@app.post("/agenda/regenerate-default")
-def agenda_regenerate_default(days: int = 14):
-    """Popula a grade default seg-sex 9h-17h pelos próximos N dias (idempotente)."""
-    if not agenda:
-        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
-    added = agenda.ensure_default_grid(days_ahead=days)
-    return {"added": added, "total_slots": len(agenda.slots)}
+@app.get("/agenda/health")
+def agenda_health():
+    """Verifica se o bot tem acesso real à agenda do Guilherme."""
+    if not calendar_mgr:
+        raise HTTPException(status_code=503, detail="CalendarManager não inicializado.")
+    return {
+        "has_real_calendar": calendar_mgr.has_real_calendar(),
+        "calendar_id": calendar_mgr.calendar_id,
+        "mode": (
+            "apps_script" if calendar_mgr.script_url
+            else "service_account" if calendar_mgr._service
+            else "link_fallback"
+        ),
+    }
 
 
 # ─── Reuniões com a assessoria ──────────────────────────────────────────────
@@ -1460,18 +1461,22 @@ def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
         logger.warning(f"[BOOK] Marcador encontrado mas agenda/meeting_svc não estão prontos.")
         return cleaned
 
-    slot = agenda.reserve(iso, user_id)
+    slot = agenda.reserve(iso, user_id, user_name=user_name or "Lead")
     if not slot:
-        logger.warning(f"[BOOK] Slot {iso} indisponível ou inválido — ignorando reserva para {user_name} ({user_id}).")
+        logger.warning(f"[BOOK] Slot {iso} indisponível ou criação falhou — {user_name} ({user_id}).")
         return cleaned + (
             "\n\n(Acabei de ver aqui e esse horário foi pego agora. "
             "Me dá um instante que eu confiro outras opções da semana.)"
         )
 
-    meeting_svc.schedule(user_id, slot["iso"], meet_link="")
+    meet_link = slot.get("meet_link") or ""
+    meeting_svc.schedule(user_id, slot["iso"], meet_link=meet_link)
     # Marca o produto pra travar fluxo e contar pra remarketing
     conv_manager.mark_link_sent(user_id, "seguro_vida")
-    logger.info(f"[BOOK] Reservado {slot['iso']} para {user_name} ({user_id})")
+    logger.info(
+        f"[BOOK] Reservado {slot['iso']} para {user_name} ({user_id}) "
+        f"— mode={slot.get('mode')} meet={'sim' if meet_link else 'nao'}"
+    )
     # Fecha o ciclo da tag: remove vida26_active e adiciona vida26_done
     # → o Condition no flow do ManyChat sai do loop e vai pra End Flow.
     if reactivation_svc:
