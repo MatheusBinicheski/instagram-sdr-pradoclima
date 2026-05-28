@@ -504,6 +504,34 @@ def agenda_health():
     }
 
 
+class AgendaBookPayload(BaseModel):
+    iso: str                       # ISO 8601 do slot (ex.: "2026-06-04T10:00:00-03:00")
+    user_name: str = "Lead"
+    user_email: Optional[str] = "" # opcional — se vier, o lead vira attendee e recebe convite
+    subscriber_id: Optional[str] = ""  # ManyChat subscriber_id — se vier, dispara cadência de lembretes
+
+
+@app.post("/agenda/book")
+def agenda_book(payload: AgendaBookPayload):
+    """Cria o evento real na agenda do Guilherme. Útil pra testes e bookings manuais."""
+    if not agenda:
+        raise HTTPException(status_code=503, detail="Agenda não inicializada.")
+    subscriber = payload.subscriber_id or f"manual_{int(__import__('time').time())}"
+    result = agenda.reserve(
+        iso=payload.iso,
+        subscriber_id=subscriber,
+        user_name=payload.user_name,
+        user_email=payload.user_email or "",
+    )
+    if not result:
+        raise HTTPException(status_code=409, detail="Slot indisponível ou criação do evento falhou.")
+    if payload.subscriber_id and meeting_svc and conv_manager:
+        if payload.subscriber_id not in conv_manager.conversations:
+            conv_manager.get_or_create(payload.subscriber_id, payload.user_name)
+        meeting_svc.schedule(payload.subscriber_id, result["iso"], meet_link=result.get("meet_link", ""))
+    return result
+
+
 # ─── Reuniões com a assessoria ──────────────────────────────────────────────
 
 class MeetingSchedulePayload(BaseModel):
