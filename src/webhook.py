@@ -1653,6 +1653,54 @@ def _parse_book_payload(content: str) -> dict:
     return out
 
 
+_EMAIL_RE_HIST = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+_PHONE_RE_HIST = re.compile(r"\+?\d[\d\s().\-]{8,18}\d")
+
+
+def _normalize_br_phone(raw: str) -> str:
+    """Normaliza pra +55DDDNNNNNNNNN. Retorna '' se ficar fora de 10-13 dígitos válidos."""
+    digits = re.sub(r"\D", "", raw or "")
+    if not digits:
+        return ""
+    # Remove DDI duplicado tipo 005511...
+    if digits.startswith("00"):
+        digits = digits[2:]
+    # Já tem DDI 55?
+    if digits.startswith("55") and len(digits) in (12, 13):
+        return "+" + digits
+    if len(digits) in (10, 11):
+        return "+55" + digits
+    if 8 <= len(digits) <= 9:
+        # número sem DDD nem DDI — perigoso, ignora
+        return ""
+    if len(digits) >= 12:
+        return "+" + digits
+    return ""
+
+
+def _extract_contacts_from_history(history: list[dict]) -> tuple[str, str]:
+    """Varre últimos turns do USER pra achar email + whatsapp se Claude esqueceu."""
+    email = ""
+    whatsapp = ""
+    for turn in reversed(history or []):
+        if turn.get("role") != "user":
+            continue
+        content = turn.get("content", "") or ""
+        if not email:
+            m = _EMAIL_RE_HIST.search(content)
+            if m:
+                email = m.group(0).strip()
+        if not whatsapp:
+            for m in _PHONE_RE_HIST.finditer(content):
+                norm = _normalize_br_phone(m.group(0))
+                if norm:
+                    whatsapp = norm
+                    break
+        if email and whatsapp:
+            break
+    return email, whatsapp
+
+
 def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
     """Detecta '[BOOK: ...]' na resposta do Claude e dispara a reserva real.
     Remove a linha do marcador antes de enviar pro lead."""
@@ -1672,12 +1720,43 @@ def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
         logger.warning(f"[BOOK] Marcador encontrado mas agenda/meeting_svc não estão prontos.")
         return cleaned
 
+    # Recupera email/whatsapp do histórico se Claude esqueceu de pôr no marker.
+    email = (payload.get("email", "") or "").strip()
+    whatsapp = (payload.get("whatsapp", "") or "").strip()
+    if not email or not whatsapp:
+        try:
+            history = conv_manager.get_history(user_id) if conv_manager else []
+            rec_email, rec_wpp = _extract_contacts_from_history(history)
+            if not email and rec_email:
+                email = rec_email
+                logger.info(f"[BOOK] Email recuperado do histórico para {user_name}: {email}")
+            if not whatsapp and rec_wpp:
+                whatsapp = rec_wpp
+                logger.info(f"[BOOK] WhatsApp recuperado do histórico para {user_name}: {whatsapp}")
+        except Exception as e:
+            logger.warning(f"[BOOK] Falha ao recuperar contato do histórico: {e}")
+    payload["email"] = email
+    payload["whatsapp"] = whatsapp
+
+    # Guard: nunca reservar sem nenhum contato — closer fica cego, lead não recebe convite.
+    if not email and not whatsapp:
+        logger.warning(
+            f"[BOOK] Bloqueando reserva de {iso} para {user_name} ({user_id}) — "
+            f"sem email NEM whatsapp no marker ou no histórico."
+        )
+        first_name = (user_name or "amigo").split()[0]
+        return (
+            f"Antes de bloquear esse horário pra você, {first_name}, "
+            f"me passa rapidinho seu email (pro convite) e seu WhatsApp "
+            f"(pro lembrete no dia). Sem isso eu não consigo travar a reunião."
+        )
+
     slot = agenda.reserve(
         iso=iso,
         subscriber_id=user_id,
         user_name=user_name or "Lead",
-        user_email=payload.get("email", ""),
-        whatsapp=payload.get("whatsapp", ""),
+        user_email=email,
+        whatsapp=whatsapp,
         qualification=payload.get("qual", ""),
     )
     if not slot:
