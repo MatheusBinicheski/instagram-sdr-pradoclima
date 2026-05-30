@@ -936,6 +936,10 @@ class RetakeVidaPayload(BaseModel):
     user_name: Optional[str] = ""
 
 
+class RetakeVidaBulkPayload(BaseModel):
+    subscribers: list[dict]  # [{"subscriber_id": "...", "user_name": "..."}]
+
+
 @app.post("/admin/retake-vida")
 def admin_retake_vida(payload: RetakeVidaPayload):
     """Força conv pro modo vida_locked e dispara DM de retake humano focado em
@@ -993,6 +997,30 @@ def admin_retake_vida(payload: RetakeVidaPayload):
         conv_manager.add_message(sub_id, "assistant", b)
     conv_manager.update_stage(sub_id, "qualificando")
     return {"sent": True, "subscriber_id": sub_id, "bubbles": bubbles}
+
+
+@app.post("/admin/retake-vida-bulk")
+def admin_retake_vida_bulk(payload: RetakeVidaBulkPayload):
+    """Roda retake-vida em batch. Body: {"subscribers": [{"subscriber_id":..., "user_name":...}, ...]}.
+    Bom pra recuperar uma fornada de leads que pivotaram pro produto errado."""
+    results = []
+    for entry in payload.subscribers or []:
+        sub_id = (entry.get("subscriber_id") or "").strip()
+        if not sub_id:
+            results.append({"subscriber_id": "", "sent": False, "error": "missing subscriber_id"})
+            continue
+        try:
+            r = admin_retake_vida(RetakeVidaPayload(
+                subscriber_id=sub_id,
+                user_name=entry.get("user_name", ""),
+            ))
+            results.append({"subscriber_id": sub_id, "sent": True, "bubbles": r.get("bubbles", [])})
+        except HTTPException as he:
+            results.append({"subscriber_id": sub_id, "sent": False, "error": he.detail})
+        except Exception as e:
+            results.append({"subscriber_id": sub_id, "sent": False, "error": str(e)})
+    sent_count = sum(1 for r in results if r.get("sent"))
+    return {"total": len(results), "sent": sent_count, "results": results}
 
 
 # ─── Webhook Greenn — confirmação de compra ──────────────────────────────────
