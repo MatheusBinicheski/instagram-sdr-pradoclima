@@ -809,6 +809,22 @@ def meeting_tick():
     return meeting_svc.run_tick()
 
 
+@app.get("/debug/calendar-events")
+def debug_calendar_events(days_back: int = 30, days_ahead: int = 60):
+    """Lista TODOS os eventos no range (sem filtro de título). Útil pra debug."""
+    if not calendar_mgr:
+        raise HTTPException(status_code=503, detail="CalendarManager não inicializado.")
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    BRT_TZ = _tz(_td(hours=-3))
+    now = _dt.now(BRT_TZ)
+    start = now - _td(days=max(0, days_back))
+    end = now + _td(days=max(1, days_ahead))
+    busy = calendar_mgr.list_busy(start, end)
+    if busy is None:
+        raise HTTPException(status_code=503, detail="Sem canal pra agenda.")
+    return {"total": len(busy), "events": busy, "range": {"from": start.isoformat(), "to": end.isoformat()}}
+
+
 @app.get("/meeting/from-calendar")
 def meeting_from_calendar(days_back: int = 30, days_ahead: int = 60):
     """Conta e lista as reuniões de seguro de vida diretamente na agenda do
