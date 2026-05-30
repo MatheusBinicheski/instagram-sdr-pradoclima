@@ -6,6 +6,7 @@ ManyChat chama POST /webhook com dados do seguidor → retorna resposta gerada p
 import asyncio
 import logging
 import re
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -898,6 +899,100 @@ def reactivation_pending(hours: int = 24):
 @app.get("/health")
 def health():
     return {"status": "ok", "bot": "Instagram SDR Bot — Eduardo Prado (@pradoclima)", "v": "5a6e430"}
+
+
+@app.get("/debug/conversations")
+def debug_conversations(limit: int = 50, last_msgs: int = 4):
+    """Lista as conversas com campos relevantes pra debug (incluindo últimos turns).
+    Útil pra identificar leads que vazaram pra outro produto e precisam retake."""
+    if not conv_manager:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    out = []
+    for uid, c in conv_manager.conversations.items():
+        history = c.get("history", [])
+        recent = [
+            {"role": t.get("role"), "content": (t.get("content") or "")[:240]}
+            for t in history[-last_msgs:]
+        ]
+        out.append({
+            "user_id": uid,
+            "user_name": c.get("user_name", ""),
+            "stage": c.get("stage", ""),
+            "status": c.get("status", ""),
+            "vida_locked": bool(c.get("vida_locked")),
+            "product_recommended": c.get("product_recommended", ""),
+            "link_sent": bool(c.get("link_sent")),
+            "meeting_scheduled": bool(c.get("meeting_scheduled")),
+            "meeting_event_id": c.get("meeting_event_id", ""),
+            "history_count": len(history),
+            "last_messages": recent,
+        })
+    out.sort(key=lambda x: x.get("history_count", 0), reverse=True)
+    return {"total": len(out), "conversations": out[:limit]}
+
+
+class RetakeVidaPayload(BaseModel):
+    subscriber_id: str
+    user_name: Optional[str] = ""
+
+
+@app.post("/admin/retake-vida")
+def admin_retake_vida(payload: RetakeVidaPayload):
+    """Força conv pro modo vida_locked e dispara DM de retake humano focado em
+    seguro de vida. Usado pra recuperar leads que o bot pivotou pra outro produto."""
+    if not conv_manager or not reactivation_svc:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    sub_id = payload.subscriber_id.strip()
+    if not sub_id:
+        raise HTTPException(status_code=400, detail="subscriber_id obrigatório.")
+
+    conv = conv_manager.conversations.get(sub_id)
+    if not conv:
+        conv = conv_manager.get_or_create(sub_id, payload.user_name or "amigo")
+    name = (payload.user_name or conv.get("user_name") or "").strip() or "amigo"
+    first_name = name.split()[0] if name and name != "amigo" else name
+
+    # Marca trava persistente
+    conv["vida_locked"] = True
+    conv["product_recommended"] = "seguro_vida"
+    try:
+        conv_manager._save()
+    except Exception:
+        pass
+
+    # Mensagem de retake — quebra em 2 balões curtos, tom humano e direto.
+    bubbles = [
+        f"Oi {first_name}, voltei aqui.",
+        "Acabei reparando que a gente desviou um pouco do que importa. O foco da nossa conversa é proteger o padrão de vida da sua família, não vender curso.",
+        "Posso te marcar 30 minutos com minha assessoria, sem custo e sem compromisso, pra você sair com clareza do que faz sentido pra você? Manhã ou tarde funciona melhor?",
+    ]
+
+    payload_send = {
+        "subscriber_id": sub_id,
+        "data": {"version": "v2", "content": {
+            "type": "instagram",
+            "messages": [{"type": "text", "text": b} for b in bubbles],
+            "actions": [], "quick_replies": [],
+        }},
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(
+                "https://api.manychat.com/fb/sending/sendContent",
+                headers={"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}", "Content-Type": "application/json"},
+                json=payload_send,
+            )
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"ManyChat erro {resp.status_code}: {resp.text[:200]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar DM: {e}")
+
+    for b in bubbles:
+        conv_manager.add_message(sub_id, "assistant", b)
+    conv_manager.update_stage(sub_id, "qualificando")
+    return {"sent": True, "subscriber_id": sub_id, "bubbles": bubbles}
 
 
 # ─── Webhook Greenn — confirmação de compra ──────────────────────────────────
