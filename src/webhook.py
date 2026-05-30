@@ -764,6 +764,64 @@ def meeting_tick():
     return meeting_svc.run_tick()
 
 
+@app.get("/meeting/from-calendar")
+def meeting_from_calendar(days_back: int = 30, days_ahead: int = 60):
+    """Conta e lista as reuniões de seguro de vida diretamente na agenda do
+    Guilherme (fonte de verdade — sobrevive a redeploy do Railway).
+
+    Filtra por summary contendo 'Seguro de Vida' ou 'Reunião — Seguro' (formato
+    novo + legado) e ignora eventos all-day."""
+    if not calendar_mgr:
+        raise HTTPException(status_code=503, detail="CalendarManager não inicializado.")
+
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    BRT_TZ = _tz(_td(hours=-3))
+    now = _dt.now(BRT_TZ)
+    start = now - _td(days=max(0, days_back))
+    end = now + _td(days=max(1, days_ahead))
+
+    busy = calendar_mgr.list_busy(start, end)
+    if busy is None:
+        raise HTTPException(status_code=503, detail="Sem canal pra consultar a agenda (Apps Script / SA não configurados).")
+
+    needles = ("seguro de vida", "reunião — seguro", "reuniao - seguro")
+    out = []
+    past_count = 0
+    future_count = 0
+    for ev in busy:
+        if ev.get("allDay"):
+            continue
+        summary = (ev.get("summary") or "").lower()
+        if not any(n in summary for n in needles):
+            continue
+        ev_start = ev.get("start") or ""
+        try:
+            ev_dt = _dt.fromisoformat(ev_start.replace("Z", "+00:00")).astimezone(BRT_TZ)
+        except (ValueError, AttributeError):
+            ev_dt = None
+        is_future = bool(ev_dt and ev_dt >= now)
+        if is_future:
+            future_count += 1
+        else:
+            past_count += 1
+        out.append({
+            "event_id": ev.get("id", ""),
+            "summary": ev.get("summary", ""),
+            "start": ev.get("start", ""),
+            "end": ev.get("end", ""),
+            "is_future": is_future,
+            "when_brt": ev_dt.strftime("%d/%m/%Y %H:%M") if ev_dt else "",
+        })
+    out.sort(key=lambda e: e.get("start") or "")
+    return {
+        "total": len(out),
+        "future": future_count,
+        "past": past_count,
+        "range": {"from": start.isoformat(), "to": end.isoformat()},
+        "meetings": out,
+    }
+
+
 @app.get("/meeting/upcoming")
 def meeting_upcoming():
     if not conv_manager:
