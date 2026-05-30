@@ -55,28 +55,44 @@ function handleFreebusy(body) {
   if (!startISO || !endISO) {
     return { success: false, error: 'startISO and endISO required' };
   }
-  const start = new Date(startISO);
-  const end = new Date(endISO);
-  const cal = CalendarApp.getCalendarById(calendarId);
-  if (!cal) {
-    return { success: false, error: 'calendar not accessible: ' + calendarId };
+
+  // Calendar.Events.list (advanced service) — devolve API event IDs reais,
+  // diferente do CalendarApp.getEvents() que devolve iCalUID. Usamos o id
+  // aqui pra que /agenda/cancel-by-iso consiga deletar pelo Events.remove.
+  let response;
+  try {
+    response = Calendar.Events.list(calendarId, {
+      timeMin: new Date(startISO).toISOString(),
+      timeMax: new Date(endISO).toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime',
+      showDeleted: false,
+      maxResults: 250,
+    });
+  } catch (e) {
+    return { success: false, error: 'list failed: ' + String(e) };
   }
-  const events = cal.getEvents(start, end);
-  const busy = events
+
+  const items = response.items || [];
+  const busy = items
     .filter(function (ev) {
-      // Ignora eventos onde o Guilherme recusou.
-      try {
-        if (ev.getMyStatus && ev.getMyStatus() === CalendarApp.GuestStatus.NO) return false;
-      } catch (e) {}
+      // Ignora eventos onde o owner recusou.
+      if (!ev.attendees) return true;
+      for (let i = 0; i < ev.attendees.length; i++) {
+        const att = ev.attendees[i];
+        if (att.self && att.responseStatus === 'declined') return false;
+      }
       return true;
     })
     .map(function (ev) {
-      const isAllDay = ev.isAllDayEvent();
+      const isAllDay = !!(ev.start && ev.start.date);
+      const startTime = (ev.start && (ev.start.dateTime || ev.start.date)) || '';
+      const endTime = (ev.end && (ev.end.dateTime || ev.end.date)) || '';
       return {
-        id: ev.getId(),
-        start: ev.getStartTime().toISOString(),
-        end: ev.getEndTime().toISOString(),
-        summary: ev.getTitle() || '',
+        id: ev.id,
+        start: startTime ? new Date(startTime).toISOString() : '',
+        end: endTime ? new Date(endTime).toISOString() : '',
+        summary: ev.summary || '',
         allDay: isAllDay,
       };
     });
@@ -150,11 +166,30 @@ function handleCreateEvent(body) {
 
 function handleCancelEvent(body) {
   const calendarId = body.calendarId || DEFAULT_CALENDAR;
-  const eventId = body.eventId;
+  let eventId = body.eventId;
   const notify = body.notifyAttendees === false ? 'none' : 'all';
   if (!eventId) {
     return { success: false, error: 'eventId required' };
   }
+
+  // Defensivo: se chegou iCalUID (formato "abc@google.com"), traduz pro API event ID.
+  if (eventId.indexOf('@') > -1) {
+    try {
+      const list = Calendar.Events.list(calendarId, {
+        iCalUID: eventId,
+        showDeleted: false,
+        maxResults: 1,
+      });
+      if (list.items && list.items.length > 0) {
+        eventId = list.items[0].id;
+      } else {
+        return { success: false, error: 'event not found by iCalUID', eventId: eventId };
+      }
+    } catch (e) {
+      return { success: false, error: 'iCalUID lookup failed: ' + String(e), eventId: eventId };
+    }
+  }
+
   try {
     Calendar.Events.remove(calendarId, eventId, { sendUpdates: notify });
     return { success: true, eventId: eventId, cancelled: true };
