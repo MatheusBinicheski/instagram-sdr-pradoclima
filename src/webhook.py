@@ -659,6 +659,41 @@ def agenda_cancel(payload: AgendaCancelPayload):
     return {"cancelled": True, "event_id": event_id, "subscriber_id": sub_id or None}
 
 
+class AgendaCancelByISOPayload(BaseModel):
+    iso: str                              # ISO 8601 do horário de início do evento
+    window_minutes: int = 5               # tolerância pra match (default 5min)
+    notify_attendees: bool = True
+
+
+@app.post("/agenda/cancel-by-iso")
+def agenda_cancel_by_iso(payload: AgendaCancelByISOPayload):
+    """Acha o evento que começa em `iso` (±window_minutes) e cancela.
+
+    Útil pra apagar evento vazio quando não temos event_id (ex: lead respondeu
+    contatos tarde demais e BOOK foi disparado vazio). Requer Apps Script com
+    `id` no retorno do freebusy."""
+    if not calendar_mgr:
+        raise HTTPException(status_code=503, detail="CalendarManager não inicializado.")
+    try:
+        from datetime import datetime as _dt
+        start_dt = _dt.fromisoformat(payload.iso)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"ISO inválido: {payload.iso}")
+
+    event_id = calendar_mgr.find_event_id_at(start_dt, window_minutes=payload.window_minutes)
+    if not event_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Nenhum evento encontrado em {payload.iso} (±{payload.window_minutes}min).",
+        )
+
+    result = calendar_mgr.cancel_meeting(event_id, notify_attendees=payload.notify_attendees)
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=f"Falha ao cancelar evento: {result.get('error')}")
+
+    return {"cancelled": True, "event_id": event_id, "iso": payload.iso}
+
+
 # ─── Reuniões com a assessoria ──────────────────────────────────────────────
 
 class MeetingSchedulePayload(BaseModel):

@@ -232,6 +232,29 @@ class CalendarManager:
             return self._cancel_via_service_account(event_id, notify_attendees)
         return {"success": False, "error": "no real calendar channel — cannot cancel"}
 
+    def find_event_id_at(self, start_dt: datetime, window_minutes: int = 5) -> Optional[str]:
+        """Acha o eventId que começa no horário dado (±window_minutes). Útil pra
+        cancelar um evento quando só temos o ISO. Requer Apps Script com `id` no
+        retorno do freebusy."""
+        if not (self.script_url or self._service):
+            return None
+        window_start = start_dt - timedelta(minutes=window_minutes)
+        window_end = start_dt + timedelta(minutes=window_minutes)
+        busy = self.list_busy(window_start, window_end) or []
+        for ev in busy:
+            ev_id = ev.get("id") or ev.get("eventId")
+            ev_start_raw = ev.get("start")
+            if not ev_id or not ev_start_raw:
+                continue
+            try:
+                ev_start = datetime.fromisoformat(ev_start_raw.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            delta = abs((ev_start - start_dt).total_seconds())
+            if delta <= window_minutes * 60:
+                return ev_id
+        return None
+
     def _cancel_via_script(self, event_id: str, notify_attendees: bool) -> dict:
         payload = {
             "secret": self.script_secret,

@@ -73,6 +73,7 @@ function handleFreebusy(body) {
     .map(function (ev) {
       const isAllDay = ev.isAllDayEvent();
       return {
+        id: ev.getId(),
         start: ev.getStartTime().toISOString(),
         end: ev.getEndTime().toISOString(),
         summary: ev.getTitle() || '',
