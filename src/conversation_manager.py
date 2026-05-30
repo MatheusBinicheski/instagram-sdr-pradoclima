@@ -11,7 +11,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DATA_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "conversations.json")
+# Permite override por env pra apontar pra Volume montado no Railway
+# (ex: DATA_DIR=/data → /data/conversations.json sobrevive a redeploys).
+_DEFAULT_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+DATA_DIR = os.environ.get("DATA_DIR") or _DEFAULT_DATA_DIR
+DATA_FILE = os.path.join(DATA_DIR, "conversations.json")
 
 
 class ConversationManager:
