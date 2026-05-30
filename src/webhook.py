@@ -127,14 +127,23 @@ async def _process_debounced(user_id: str):
         triggered_product = last["triggered_product"]
         product_from_keyword = last["product_from_keyword"]
 
+        # Sinal de "essa conversa é sobre seguro de vida" baseado em conteúdo
+        # (mensagem atual OU histórico, inclusive bot puxando vida na primeira msg
+        # via comment-reply de post sobre seguro). Independe da tag do ManyChat.
+        seguros_context_signal = _is_seguros_context(combined_message, history, conv)
+
         # Trava VIDA persistente — vale para o resto da conversa, não só pra essa mensagem.
         # Uma vez travado, o lead só recebe fluxo de seguro de vida (agenda),
         # independente do que ele falar depois (negócio, vendas, família, etc.).
+        # Dispara por: tag de campanha, conv já travada, produto já recomendado,
+        # reunião marcada, OU contexto de vida detectado no conteúdo (cobre
+        # leads que entraram por comment-reply sem tag vida26_active).
         vida_locked = bool(
             triggered_product == "seguro_vida"
             or conv.get("vida_locked")
             or conv.get("product_recommended") == "seguro_vida"
             or conv.get("meeting_scheduled")
+            or seguros_context_signal
         )
         if vida_locked:
             if triggered_product and triggered_product != "seguro_vida":
@@ -184,8 +193,8 @@ async def _process_debounced(user_id: str):
 
         extra_context = ""
 
-        # Detecta se conversa é sobre seguro de vida → injeta agenda
-        seguros_now = _is_seguros_context(combined_message, history, conv) or vida_locked
+        # Já calculado acima — reusa pra decidir injeção de agenda.
+        seguros_now = seguros_context_signal or vida_locked
         if seguros_now and agenda:
             # Limit baixo de propósito: Claude só precisa de 8-10 slots pra oferecer 3.
             # Lista maior aumenta latência e custo sem benefício real.
@@ -202,15 +211,27 @@ async def _process_debounced(user_id: str):
             # whatsapp + marcador [BOOK: ...]. O SEGURO_VIDA_PROMPT_BLOCK no system
             # prompt já contém o roteiro.
             extra_context += (
-                "TRAVA VIDA (OBRIGATÓRIA): Este lead veio da campanha de seguro de vida "
-                "(tag vida26_active). Seu único objetivo é levar ele pra reunião de 30 min "
-                "com a assessoria do Guilherme. "
-                "Se ele falar de negócio, vendas, marketing, empresa, família, escola ou qualquer "
-                "outro tema, escuta com empatia mas SEMPRE redireciona pra proteção (renda, padrão "
-                "de vida da família, sucessão). "
-                "PROIBIDO oferecer Método 26, Família 26, Mapa de Convencer, Arte de Precificar "
-                "ou qualquer outro produto. PROIBIDO mandar link de curso. "
-                "PROIBIDO mudar de assunto pra outro produto. "
+                "TRAVA VIDA (OBRIGATÓRIA): Esta conversa é sobre SEGURO DE VIDA. "
+                "Seu único objetivo é levar o lead pra reunião de 30 min com a "
+                "assessoria do Guilherme.\n\n"
+                "REGRA DE OURO: se o lead mencionar negócio, empresa, faturamento, "
+                "vendas, falência, dinheiro apertado, dívida, sócio, marketing — "
+                "VOCÊ NÃO APROFUNDA NO TEMA DELE. Você reconhece em UMA frase curta "
+                "e na próxima fala JÁ pergunta sobre quem depende dele financeiramente "
+                "(família, filhos, esposa, pais) e o que aconteceria com ELES.\n\n"
+                "EXEMPLO ERRADO (NÃO faça):\n"
+                "  Lead: 'tô beirando a falência'\n"
+                "  Bot:  'me conta, tá ameaçando o negócio agora ou já passou?'\n"
+                "  ↑ pivotou pra negócio, perdeu o lead.\n\n"
+                "EXEMPLO CERTO:\n"
+                "  Lead: 'tô beirando a falência'\n"
+                "  Bot:  'Tereza, sinto muito. Cenário pesado.\n\n"
+                "         Quem mais ia sentir esse baque junto com você? Tem filhos,\n"
+                "         esposo ou alguém que depende da sua renda hoje?'\n"
+                "  ↑ acolheu, mudou foco pros dependentes, segue a conversa de vida.\n\n"
+                "PROIBIDO oferecer Método 26, Família 26, Mapa de Convencer, Arte de "
+                "Precificar ou qualquer outro produto. PROIBIDO mandar link de curso. "
+                "PROIBIDO perguntar mais sobre o problema do negócio. "
                 "Termina sempre AGENDANDO a reunião.\n\n"
             )
         elif triggered_product:
