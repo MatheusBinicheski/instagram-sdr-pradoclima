@@ -2140,7 +2140,8 @@ def _process_booking_marker(text: str, user_id: str, user_name: str) -> str:
         return (
             f"Antes de bloquear esse horário pra você, {first_name}, "
             f"me passa rapidinho seu email (pro convite) e seu WhatsApp "
-            f"(pro lembrete no dia). Sem isso eu não consigo travar a reunião."
+            f"(pra minha equipe te chamar antes da reunião se precisar). "
+            f"Sem isso eu não consigo travar a reunião."
         )
 
     slot = agenda.reserve(
