@@ -127,6 +127,35 @@ async def _process_debounced(user_id: str):
         triggered_product = last["triggered_product"]
         product_from_keyword = last["product_from_keyword"]
 
+        # Trava VIDA persistente — vale para o resto da conversa, não só pra essa mensagem.
+        # Uma vez travado, o lead só recebe fluxo de seguro de vida (agenda),
+        # independente do que ele falar depois (negócio, vendas, família, etc.).
+        vida_locked = bool(
+            triggered_product == "seguro_vida"
+            or conv.get("vida_locked")
+            or conv.get("product_recommended") == "seguro_vida"
+            or conv.get("meeting_scheduled")
+        )
+        if vida_locked:
+            if triggered_product and triggered_product != "seguro_vida":
+                logger.info(
+                    f"[VIDA-LOCK] Conv travada em vida — ignora triggered_product={triggered_product} "
+                    f"({user_name} / {user_id})"
+                )
+            if product_from_keyword and product_from_keyword != "seguro_vida":
+                logger.info(
+                    f"[VIDA-LOCK] Conv travada em vida — ignora keyword={product_from_keyword} "
+                    f"({user_name} / {user_id})"
+                )
+                product_from_keyword = None
+            triggered_product = "seguro_vida"
+            if not conv.get("vida_locked"):
+                conv["vida_locked"] = True
+                try:
+                    conv_manager._save()
+                except Exception:
+                    pass
+
         # Produto já recomendado em mensagens anteriores (trava anti-troca-de-produto)
         already_recommended = conv.get("product_recommended") if conv.get("link_sent") else None
         locked_product = None
@@ -156,7 +185,7 @@ async def _process_debounced(user_id: str):
         extra_context = ""
 
         # Detecta se conversa é sobre seguro de vida → injeta agenda
-        seguros_now = _is_seguros_context(combined_message, history, conv)
+        seguros_now = _is_seguros_context(combined_message, history, conv) or vida_locked
         if seguros_now and agenda:
             # Limit baixo de propósito: Claude só precisa de 8-10 slots pra oferecer 3.
             # Lista maior aumenta latência e custo sem benefício real.
@@ -168,7 +197,23 @@ async def _process_debounced(user_id: str):
                 conv["vida26_active_tagged"] = True
                 conv_manager._save()
 
-        if triggered_product:
+        if vida_locked:
+            # Não dispara o "manda AGORA o link" — vida exige qualificação + email +
+            # whatsapp + marcador [BOOK: ...]. O SEGURO_VIDA_PROMPT_BLOCK no system
+            # prompt já contém o roteiro.
+            extra_context += (
+                "TRAVA VIDA (OBRIGATÓRIA): Este lead veio da campanha de seguro de vida "
+                "(tag vida26_active). Seu único objetivo é levar ele pra reunião de 30 min "
+                "com a assessoria do Guilherme. "
+                "Se ele falar de negócio, vendas, marketing, empresa, família, escola ou qualquer "
+                "outro tema, escuta com empatia mas SEMPRE redireciona pra proteção (renda, padrão "
+                "de vida da família, sucessão). "
+                "PROIBIDO oferecer Método 26, Família 26, Mapa de Convencer, Arte de Precificar "
+                "ou qualquer outro produto. PROIBIDO mandar link de curso. "
+                "PROIBIDO mudar de assunto pra outro produto. "
+                "Termina sempre AGENDANDO a reunião.\n\n"
+            )
+        elif triggered_product:
             p = PRODUCTS[triggered_product]
             extra_context = (
                 f"AÇÃO OBRIGATÓRIA: O lead digitou uma palavra-chave de produto. "
@@ -202,6 +247,7 @@ async def _process_debounced(user_id: str):
                     attachment_type=attachment_type,
                     attachment_url=attachment_url,
                     extra_context=extra_context,
+                    force_product="seguro_vida" if vida_locked else None,
                 ),
                 timeout=15,
             )
@@ -352,6 +398,12 @@ TAG_TO_PRODUCT = {
     "open_checkout_familia26": "blindar_mente_filho",
     "familia26": "blindar_mente_filho",
     "família26": "blindar_mente_filho",
+    # Campanha seguro de vida — lead vem travado pra agenda do Guilherme
+    "vida26_active": "seguro_vida",
+    "vida26": "seguro_vida",
+    "open_checkout_vida26": "seguro_vida",
+    "vida_active": "seguro_vida",
+    "seguro_vida_active": "seguro_vida",
 }
 
 KEYWORD_TO_PRODUCT = [
@@ -373,12 +425,16 @@ def _detect_keyword_product(text: str) -> Optional[str]:
 
 
 def _detect_tag_product(tag: str) -> Optional[str]:
-    """Tag exata OU qualquer tag contendo 'metodo26'/'familia26' → produto correspondente."""
+    """Tag exata OU substring de campanha → produto correspondente."""
     if not tag:
         return None
     exact = TAG_TO_PRODUCT.get(tag)
     if exact:
         return exact
+    # Vida vence as outras — checa primeiro pra leads da campanha de seguro de vida
+    # que possam ter outras tags acumuladas.
+    if "vida26" in tag or "vida_active" in tag:
+        return "seguro_vida"
     if "metodo26" in tag or "método26" in tag:
         return "estrategias_vendas_digital"
     if "familia26" in tag or "família26" in tag:
@@ -419,7 +475,20 @@ async def manychat_webhook(payload: ManyChatPayload):
     tag = _clean(payload.tag or "").lower()
     product_from_tag = _detect_tag_product(tag)
     product_from_keyword = _detect_keyword_product(message)
-    triggered_product = product_from_keyword or product_from_tag
+
+    # Trava VIDA: tag da campanha de seguro de vida vence qualquer keyword de outro produto.
+    # Lead que veio por essa campanha NÃO recebe Método 26 / Família 26 / MCC / Arte —
+    # mesmo se mencionar "vendas" ou "família" no meio da conversa.
+    if product_from_tag == "seguro_vida":
+        if product_from_keyword and product_from_keyword != "seguro_vida":
+            logger.info(
+                f"[VIDA-LOCK] Tag vida26 ignora keyword product={product_from_keyword} "
+                f"para {user_name} ({user_id})"
+            )
+        product_from_keyword = None
+        triggered_product = "seguro_vida"
+    else:
+        triggered_product = product_from_keyword or product_from_tag
 
     logger.info(f"[DM] {user_name} ({user_id}) [{attachment_type or 'text'}]: '{(message or attachment_url)[:80]}'")
 
@@ -1535,6 +1604,8 @@ def _is_seguros_context(message: str, history: list[dict], conv: dict) -> bool:
     """Decide se a conversa atual é sobre seguro de vida, pra injetar a agenda
     no contexto do Claude. Heurística simples: palavra-chave na mensagem
     atual OU já houve reunião agendada OU já houve menção em histórico recente."""
+    if conv.get("vida_locked"):
+        return True
     msg = (message or "").lower()
     if any(k in msg for k in _SEGURO_KEYS_LOWER):
         return True

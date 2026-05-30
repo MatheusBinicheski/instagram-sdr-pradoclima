@@ -234,16 +234,26 @@ class SalesAgent:
         attachment_type: str = "",
         attachment_url: str = "",
         extra_context: str = "",
+        force_product: Optional[str] = None,
     ) -> str:
-        """Versão assíncrona de generate_dm_response — não bloqueia o event loop."""
-        product_hint = self._identify_best_product(user_message)
+        """Versão assíncrona de generate_dm_response — não bloqueia o event loop.
+
+        Se `force_product` for passado (ex: "seguro_vida" para leads travados na campanha
+        de vida), pula a heurística de keyword e NÃO injeta DICA de outro produto.
+        """
         product_context = ""
-        if product_hint:
-            p = PRODUCTS[product_hint]
-            product_context = (
-                f"\n\nDICA: Pela mensagem, o produto mais indicado parece ser '{p['name']}' "
-                f"(link: {p['link']}). Considere apresentá-lo se fizer sentido no contexto."
-            )
+        if force_product == "seguro_vida":
+            # Lead travado em vida — não passa DICA de produto pro Claude (o SEGURO_VIDA_PROMPT_BLOCK
+            # no system prompt já contém todo o roteiro de qualificação + agendamento).
+            pass
+        else:
+            product_hint = self._identify_best_product(user_message)
+            if product_hint:
+                p = PRODUCTS[product_hint]
+                product_context = (
+                    f"\n\nDICA: Pela mensagem, o produto mais indicado parece ser '{p['name']}' "
+                    f"(link: {p['link']}). Considere apresentá-lo se fizer sentido no contexto."
+                )
 
         stage_instructions = {
             "conexao": "Esta é a primeira mensagem. Crie conexão e faça UMA pergunta sobre o negócio da pessoa.",
