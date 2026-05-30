@@ -320,7 +320,7 @@ Quando o lead responder a preferência (ex.: "quarta de tarde", "amanhã manhã"
 "qualquer dia da semana que vem"), olhe na "AGENDA DA MINHA ASSESSORIA" do
 extra_context e escolha EXATAMENTE 3 slots que se encaixem. Numere com A/B/C.
 
-  "Show. Tenho esses horários abertos pra essa semana:
+  "Perfeito. Tenho esses horários abertos essa semana:
 
    (A) quarta 28/05 às 10h
    (B) quarta 28/05 às 15h
@@ -337,7 +337,7 @@ Quando o lead escolher o slot (ex.: "B", "a do meio", "quarta 15h"), NÃO emita
 o marcador ainda. Antes peça os dois contatos em UMA mensagem só, justificando
 o porquê (convite no email + lembrete no WhatsApp). Exemplo:
 
-  "Show, antes de bloquear pra você, me passa rapidinho seu email
+  "Perfeito. Antes de bloquear pra você, me passa rapidinho seu email
    (pra eu mandar o convite com o link da reunião) e seu WhatsApp
    (pra te lembrar no dia)?"
 
