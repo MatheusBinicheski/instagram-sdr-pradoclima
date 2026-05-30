@@ -1038,6 +1038,73 @@ def admin_retake_vida(payload: RetakeVidaPayload):
     return {"sent": True, "subscriber_id": sub_id, "bubbles": bubbles}
 
 
+@app.get("/admin/retake-candidates")
+def admin_retake_candidates(
+    keyword: str = "vida26",
+    only_today: bool = True,
+    skip_meeting_scheduled: bool = True,
+):
+    """Lista candidatos a retake: leads que digitaram `keyword` no histórico
+    (ou na lista keywords_triggered), opcionalmente só os ativos hoje, e por
+    default ignora quem já tem reunião marcada.
+
+    Retorna {total, candidates: [{subscriber_id, user_name, stage, product, last_user_at, hit, preview}]}.
+    Use o resultado como input pra /admin/retake-vida-bulk."""
+    if not conv_manager:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    from datetime import datetime as _dt
+    BRT_DATE = _dt.now().date()
+    needle = (keyword or "").lower().strip()
+    if not needle:
+        raise HTTPException(status_code=400, detail="keyword obrigatória.")
+    out = []
+    for uid, c in conv_manager.conversations.items():
+        if skip_meeting_scheduled and c.get("meeting_scheduled"):
+            continue
+        # Today filter
+        if only_today:
+            last_at = c.get("last_user_message_at") or c.get("last_interaction")
+            if not last_at:
+                continue
+            try:
+                last_dt = _dt.fromisoformat(last_at)
+            except (ValueError, TypeError):
+                continue
+            if last_dt.date() != BRT_DATE:
+                continue
+        # Match keyword in keywords_triggered OR full history
+        kw_triggered = [str(k).lower() for k in (c.get("keywords_triggered") or [])]
+        hit_keyword = needle in kw_triggered or any(needle in k for k in kw_triggered)
+        hit_text = ""
+        if not hit_keyword:
+            for m in c.get("history") or []:
+                content = (m.get("content") or "").lower()
+                if needle in content and m.get("role") == "user":
+                    hit_text = (m.get("content") or "")[:140]
+                    break
+        if not (hit_keyword or hit_text):
+            continue
+        last_user_msg = ""
+        for m in reversed(c.get("history") or []):
+            if m.get("role") == "user":
+                last_user_msg = (m.get("content") or "")[:140]
+                break
+        out.append({
+            "subscriber_id": uid,
+            "user_name": c.get("user_name", ""),
+            "stage": c.get("stage", ""),
+            "product_recommended": c.get("product_recommended", ""),
+            "vida_locked": bool(c.get("vida_locked")),
+            "link_sent": bool(c.get("link_sent")),
+            "last_user_at": c.get("last_user_message_at", ""),
+            "hit_keyword": hit_keyword,
+            "hit_text_preview": hit_text,
+            "last_user_message_preview": last_user_msg,
+        })
+    out.sort(key=lambda x: x.get("last_user_at") or "", reverse=True)
+    return {"total": len(out), "keyword": needle, "only_today": only_today, "candidates": out}
+
+
 @app.post("/admin/retake-vida-bulk")
 def admin_retake_vida_bulk(payload: RetakeVidaBulkPayload):
     """Roda retake-vida em batch. Body: {"subscribers": [{"subscriber_id":..., "user_name":...}, ...]}.
