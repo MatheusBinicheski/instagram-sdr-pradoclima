@@ -207,7 +207,30 @@ async def _process_debounced(user_id: str):
                 conv["vida26_active_tagged"] = True
                 conv_manager._save()
 
-        if vida_locked:
+        meeting_already_booked = bool(conv.get("meeting_scheduled"))
+
+        if vida_locked and meeting_already_booked:
+            # Pós-agendamento — não inicia nova venda, não pergunta opener.
+            meeting_dt = conv.get("meeting_time") or ""
+            extra_context += (
+                "REUNIÃO JÁ AGENDADA (PÓS-BOOKING): O lead JÁ está com a reunião "
+                f"marcada{f' em {meeting_dt}' if meeting_dt else ''}. PROIBIDO ABSOLUTAMENTE "
+                "iniciar nova conversa de qualificação, abrir com 'me conta o que tá "
+                "travando seu negócio', perguntar de novo o que ele precisa, ou oferecer "
+                "outro produto. PROIBIDO repetir agradecimento por email/WhatsApp se você "
+                "já agradeceu.\n\n"
+                "Como responder daqui pra frente:\n"
+                "  - Se o lead manda mensagem casual / animado / curioso: responde curto "
+                "e firme, reforça que a equipe vai aparecer no dia, 30 min sem custo.\n"
+                "  - Se o lead tem dúvida específica sobre a reunião (horário, formato, "
+                "link, o que levar): responde direto, sem reabrir qualificação.\n"
+                "  - Se o lead quer remarcar ou cancelar: acolhe e diz que vai consultar "
+                "agenda (o sistema trata a parte técnica).\n"
+                "  - Se o lead está em silêncio ou cumprimentando: fala alguma coisa breve "
+                "e positiva, NÃO faz pergunta nova.\n\n"
+                "NUNCA emita [BOOK: ...] nesta etapa — a reunião já existe.\n\n"
+            )
+        elif vida_locked:
             # Não dispara o "manda AGORA o link" — vida exige qualificação + email +
             # whatsapp + marcador [BOOK: ...]. O SEGURO_VIDA_PROMPT_BLOCK no system
             # prompt já contém o roteiro.
@@ -964,11 +987,11 @@ def admin_retake_vida(payload: RetakeVidaPayload):
     except Exception:
         pass
 
-    # Mensagem de retake — quebra em 2 balões curtos, tom humano e direto.
+    # Mensagem de retake — humana, sem mencionar "vender curso".
     bubbles = [
         f"Oi {first_name}, voltei aqui.",
-        "Acabei reparando que a gente desviou um pouco do que importa. O foco da nossa conversa é proteger o padrão de vida da sua família, não vender curso.",
-        "Posso te marcar 30 minutos com minha assessoria, sem custo e sem compromisso, pra você sair com clareza do que faz sentido pra você? Manhã ou tarde funciona melhor?",
+        "Quero retomar nossa conversa direito. A ideia aqui é entender como proteger o padrão de vida da sua família se algo grave acontecer com você.",
+        "Posso te marcar 30 minutos com minha assessoria, sem custo e sem compromisso, pra você sair com clareza do que faz sentido pra você? Manhã ou tarde fica melhor?",
     ]
 
     payload_send = {
