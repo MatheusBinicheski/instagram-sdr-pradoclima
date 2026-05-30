@@ -1105,6 +1105,55 @@ def admin_retake_candidates(
     return {"total": len(out), "keyword": needle, "only_today": only_today, "candidates": out}
 
 
+class SendCustomPayload(BaseModel):
+    subscriber_id: str
+    bubbles: list[str]
+    record_in_history: bool = True
+
+
+@app.post("/admin/send-custom")
+def admin_send_custom(payload: SendCustomPayload):
+    """Envia uma sequência de bolhas customizadas pro lead via ManyChat e
+    opcionalmente registra no histórico do conv. Útil pra confirmações pontuais
+    (booking, lembrete, follow-up manual)."""
+    if not Config.MANYCHAT_API_KEY:
+        raise HTTPException(status_code=503, detail="MANYCHAT_API_KEY não configurada.")
+    sub_id = (payload.subscriber_id or "").strip()
+    if not sub_id:
+        raise HTTPException(status_code=400, detail="subscriber_id obrigatório.")
+    bubbles = [b for b in (payload.bubbles or []) if b and b.strip()]
+    if not bubbles:
+        raise HTTPException(status_code=400, detail="bubbles vazias.")
+
+    body = {
+        "subscriber_id": sub_id,
+        "data": {"version": "v2", "content": {
+            "type": "instagram",
+            "messages": [{"type": "text", "text": b} for b in bubbles],
+            "actions": [], "quick_replies": [],
+        }},
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            r = client.post(
+                "https://api.manychat.com/fb/sending/sendContent",
+                headers={"Authorization": f"Bearer {Config.MANYCHAT_API_KEY}", "Content-Type": "application/json"},
+                json=body,
+            )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"ManyChat erro {r.status_code}: {r.text[:200]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar DM: {e}")
+
+    if payload.record_in_history and conv_manager and sub_id in conv_manager.conversations:
+        for b in bubbles:
+            conv_manager.add_message(sub_id, "assistant", b)
+
+    return {"sent": True, "subscriber_id": sub_id, "bubbles": bubbles}
+
+
 @app.post("/admin/retake-vida-bulk")
 def admin_retake_vida_bulk(payload: RetakeVidaBulkPayload):
     """Roda retake-vida em batch. Body: {"subscribers": [{"subscriber_id":..., "user_name":...}, ...]}.
