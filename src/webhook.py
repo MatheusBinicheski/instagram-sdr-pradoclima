@@ -1105,6 +1105,46 @@ def admin_retake_candidates(
     return {"total": len(out), "keyword": needle, "only_today": only_today, "candidates": out}
 
 
+class SetVidaLockPayload(BaseModel):
+    subscriber_ids: list[str]
+    reset_stage: bool = True
+
+
+@app.post("/admin/set-vida-lock")
+def admin_set_vida_lock(payload: SetVidaLockPayload):
+    """Seta vida_locked=True + product_recommended=seguro_vida nos conv ids dados,
+    SEM mandar mensagem. Garante que quando o lead responder, o bot abra em
+    modo SEGURO DE VIDA e não no roteiro antigo dele.
+
+    Útil pra leads que receberam retake via send-custom (que não força a trava)
+    OU que vieram de outra campanha mas agora pertencem ao funil vida."""
+    if not conv_manager:
+        raise HTTPException(status_code=503, detail="Bot não inicializado.")
+    results = []
+    for sub_id in payload.subscriber_ids or []:
+        sub_id = (sub_id or "").strip()
+        if not sub_id:
+            results.append({"subscriber_id": "", "ok": False, "error": "empty"})
+            continue
+        conv = conv_manager.conversations.get(sub_id)
+        if not conv:
+            # cria com nome genérico se ainda não existe
+            conv = conv_manager.get_or_create(sub_id, "amigo")
+        conv["vida_locked"] = True
+        conv["product_recommended"] = "seguro_vida"
+        if payload.reset_stage:
+            conv["stage"] = "qualificando"
+        # limpa link_sent se apontava pra produto não-vida
+        if conv.get("product_recommended") != "seguro_vida":
+            conv["link_sent"] = False
+        results.append({"subscriber_id": sub_id, "ok": True, "name": conv.get("user_name", "")})
+    try:
+        conv_manager._save()
+    except Exception:
+        pass
+    return {"total": len(results), "locked": sum(1 for r in results if r["ok"]), "results": results}
+
+
 class SendCustomPayload(BaseModel):
     subscriber_id: str
     bubbles: list[str]
